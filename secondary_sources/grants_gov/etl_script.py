@@ -6,6 +6,8 @@ import datetime
 import pandas as pd
 from sqlalchemy import create_engine
 import numpy as np
+import psycopg2
+import time
 import xmltodict  # For XML to JSON conversion
 import traceback  # Adding explicit import for traceback
 
@@ -16,27 +18,80 @@ BASE_URL = "https://prod-grants-gov-chatbot.s3.amazonaws.com/extracts/"
 def download_specific_file(date_str):
     """
     Download a specific file from Grants.gov by date string (YYYYMMDD)
+    with timeout and error handling
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     zip_url = f"{BASE_URL}GrantsDBExtract{date_str}v2.zip"
     zip_filename = f"GrantsDBExtract{date_str}v2.zip"
     
-    print(f"Attempting to download: {zip_url}")
+    logger.info(f"Attempting to download: {zip_url}")
     
     try:
-        # Download the file
-        response = requests.get(zip_url, stream=True)
-        response.raise_for_status()  # Raise exception for bad status codes
-        
-        # Save the zip file
-        with open(zip_filename, "wb") as file:
-            for chunk in response.iter_content(chunk_size=8192):
-                file.write(chunk)
-        
-        print(f"Successfully downloaded: {zip_filename} ({os.path.getsize(zip_filename) / (1024*1024):.1f} MB)")
-        return zip_filename
+        # Your existing code
+        logger.info("Starting download request")
+        # ...
+    except Exception as e:
+        logger.error(f"Download error: {str(e)}")
     
+    try:
+        # Download the file with a timeout
+        response = requests.get(zip_url, stream=True, timeout=60)
+        
+        # Check if the response was successful
+        if response.status_code == 200:
+            # Save the zip file
+            total_size = int(response.headers.get('content-length', 0))
+            print(f"File size: {total_size / (1024*1024):.2f} MB")
+            
+            with open(zip_filename, 'wb') as f:
+                downloaded = 0
+                start_time = time.time()
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        # Print progress every 5MB
+                        if downloaded % (5 * 1024 * 1024) < 8192:
+                            elapsed = time.time() - start_time
+                            mbytes = downloaded / (1024 * 1024)
+                            print(f"Downloaded: {mbytes:.2f} MB in {elapsed:.2f} seconds ({mbytes/elapsed:.2f} MB/s)")
+            
+            # Verify file was downloaded successfully
+            if os.path.exists(zip_filename) and os.path.getsize(zip_filename) > 0:
+                print(f"Successfully downloaded: {zip_filename}")
+                return zip_filename
+            else:
+                print(f"Download appears to have failed - file is empty or not found")
+                if os.path.exists(zip_filename):
+                    os.remove(zip_filename)
+                return None
+        else:
+            print(f"Failed to download file. Status code: {response.status_code}")
+            return None
+    
+    except requests.exceptions.Timeout:
+        print(f"Request timed out when downloading: {zip_url}")
+        return None
+    except requests.exceptions.ConnectionError:
+        print(f"Connection error when downloading: {zip_url}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error during download: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
+    
+    except requests.exceptions.Timeout:
+        print(f"Download timed out after 120 seconds: {zip_url}")
+        return None
     except requests.exceptions.RequestException as e:
         print(f"Download failed: {e}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error during download: {str(e)}")
         return None
 
 def extract_xml_from_zip_to_json(zip_filename):
@@ -264,6 +319,13 @@ def process_data(data):
                 print(f"  Sample values for {target_col}: {df[source_col].head(3).tolist()}")
                 print(f"  NULL count: {df[source_col].isna().sum()} of {len(df)}")
     
+    # Create opportunity_link column by concatenating base URL with opportunity_id
+    base_url = "https://www.grants.gov/search-results-detail/"
+    if 'opportunity_id' in processed_df.columns:
+        processed_df['opportunity_link'] = base_url + processed_df['opportunity_id'].astype(str)
+        print(f"Created opportunity_link column with {processed_df['opportunity_link'].count()} valid URLs")
+        print(f"Sample URLs: {processed_df['opportunity_link'].head(3).tolist()}")
+    
     # Convert date columns properly - using custom date parser
     date_columns = ['post_date', 'close_date', 'last_updated_date', 'archive_date']
     for col in date_columns:
@@ -367,12 +429,45 @@ def store_in_postgres(data_frame):
     Store the processed dataframe into PostgreSQL
     """
     try:
-        # Create database connection with correct connection string format
-        username = "YOUR_USER_NAME"
-        password = "YOUR_PASSWORD"
+        # Use the actual connection parameters for testing instead of placeholders
+        username = "postgres"
+        password = "Ding86000688"
         host = "localhost"
         port = "5432"
-        database = "YOUR_DB_NAME"
+        database = "grants_db"
+        
+        # Test connection with actual credentials
+        conn = psycopg2.connect(
+            host=host,
+            database=database,
+            user=username,
+            password=password,
+            port=port
+        )
+        conn.close()
+        print("PostgreSQL connection test successful")
+        
+        # Construct proper connection string
+        connection_string = f"postgresql://{username}:{password}@{host}:{port}/{database}"
+        
+        # Create engine with a specific SQLAlchemy URL format
+        from sqlalchemy.engine import URL
+        from sqlalchemy import text, inspect
+        
+        engine = create_engine(connection_string)
+        inspector = inspect(engine)
+    except Exception as e:
+        print(f"Error connecting to PostgreSQL: {e}")
+        traceback.print_exc()
+        return False
+    
+    try:
+        # Create database connection with correct connection string format
+        username = "postgres"
+        password = "Ding86000688"
+        host = "localhost"
+        port = "5432"
+        database = "grants_db"
         
         # Construct proper connection string
         connection_string = f"postgresql://{username}:{password}@{host}:{port}/{database}"
@@ -499,11 +594,11 @@ def store_in_postgres(data_frame):
 def reset_database():
     """Drop and recreate the grants_data table to start fresh"""
     try:
-        username = "YOUR_USER_NAME"
-        password = "YOUR_PASSWORD"
+        username = "postgres"
+        password = "Ding86000688"
         host = "localhost"
         port = "5432"
-        database = "YOUR_DB_NAME"
+        database = "grants_db"
         
         connection_string = f"postgresql://{username}:{password}@{host}:{port}/{database}"
         engine = create_engine(connection_string)
@@ -523,16 +618,69 @@ def reset_database():
         print(f"Error resetting database: {e}")
         traceback.print_exc()
         return False
-    
+
+
+def add_opportunity_link_column():
+    """Add opportunity_link column to the grants_data table if it doesn't exist"""
+    try:
+        username = "postgres"
+        password = "Ding86000688"
+        host = "localhost"
+        port = "5432"
+        database = "grants_db"
+        
+        connection_string = f"postgresql://{username}:{password}@{host}:{port}/{database}"
+        engine = create_engine(connection_string)
+        
+        # Check if column exists
+        with engine.connect() as conn:
+            from sqlalchemy import text
+            from sqlalchemy import inspect
+            
+            inspector = inspect(engine)
+            columns = [col['name'] for col in inspector.get_columns('grants_data')]
+            
+            if 'opportunity_link' not in columns:
+                print("Adding opportunity_link column to grants_data table...")
+                
+                # Add the column
+                add_column_sql = """
+                ALTER TABLE grants_data 
+                ADD COLUMN opportunity_link TEXT
+                """
+                
+                # Update existing rows with links
+                update_links_sql = """
+                UPDATE grants_data
+                SET opportunity_link = 'https://www.grants.gov/search-results-detail/' || opportunity_id
+                WHERE opportunity_link IS NULL
+                """
+                
+                conn.execute(text(add_column_sql))
+                conn.execute(text(update_links_sql))
+                conn.commit()
+                
+                print("Successfully added opportunity_link column and populated existing records")
+            else:
+                print("opportunity_link column already exists")
+                
+        return True
+    except Exception as e:
+        print(f"Error adding opportunity_link column: {e}")
+        traceback.print_exc()
+        return False
+
+
+
 def ensure_postgres_table():
     """Ensure the grants_data table exists in PostgreSQL with the correct schema"""
     try:
         # Create database connection
-        username = "YOUR_USER_NAME"
-        password = "YOUR_PASSWORD"
-        host = "localhost"
+        username = "postgres"
+        password = "Ding86000688"
+        host = "localhost" 
         port = "5432"
-        database = "YOUR_DB_NAME"
+        database = "grants_db"
         
         connection_string = f"postgresql://{username}:{password}@{host}:{port}/{database}"
         engine = create_engine(connection_string)
@@ -566,6 +714,7 @@ def ensure_postgres_table():
             grantor_email TEXT,
             grantor_email_desc TEXT,
             grantor_contact TEXT,
+            opportunity_link TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -636,6 +785,8 @@ def run_etl(date_str):
     
     return result
 
+
+
 # Run the script
 if __name__ == "__main__":
     # Option to reset database - set to True to drop and recreate the table
@@ -646,6 +797,9 @@ if __name__ == "__main__":
         if not reset_database():
             print("Database reset failed. Exiting.")
             exit(1)
+    else:
+        # If not resetting, check and add opportunity_link column if needed
+        add_opportunity_link_column()
     
     # Try today's date first
     today_date = datetime.datetime.now().strftime("%Y%m%d")
