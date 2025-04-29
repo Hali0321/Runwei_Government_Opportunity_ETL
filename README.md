@@ -14,7 +14,7 @@ A Python wrapper for the Grants.gov API that allows programmatic access to feder
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/grants-gov-api.git
+git clone https://github.com/Hali0321/Runwei_Government_Opportunity_ETL/blob/main/grants.gov.api/grants_gov_api.py
 cd grants-gov-api
 
 # Install dependencies
