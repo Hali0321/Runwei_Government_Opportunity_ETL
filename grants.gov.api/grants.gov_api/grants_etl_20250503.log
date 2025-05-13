@@ -1,7 +1,0 @@
-2025-05-03 00:48:22,865 - __main__ - INFO - Database tables created or verified
-2025-05-03 00:48:22,865 - __main__ - INFO - Using sample data instead of API
-2025-05-03 00:48:22,866 - __main__ - INFO - Using local fallback to generate 95 sample opportunities
-2025-05-03 00:48:22,866 - __main__ - INFO - Generated 95 additional sample opportunities
-2025-05-03 00:48:22,866 - __main__ - INFO - Extracted 100 opportunities
-2025-05-03 00:48:22,867 - grants_gov.etl.transform - INFO - Transformed 100 opportunities
-2025-05-03 00:48:23,014 - __main__ - INFO - Loaded 100 opportunities into the database
