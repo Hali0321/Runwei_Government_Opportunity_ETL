@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+import os
+import requests
+import json
+import time
+import logging
+import sys
+import re
+from datetime import datetime
+from azure.data.tables import TableServiceClient, UpdateMode
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(f"fix_grants_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    ]
+)
+logger = logging.getLogger(__name__)
+
+def get_connection_string():
+    """Get Azure Storage connection string"""
+    connection_string = os.environ.get("STORAGE_CONNECTION")
+    
+    if not connection_string:
+        # Try to get it from Azure CLI
+        import subprocess
+        try:
+            result = subprocess.run([
+                'az', 'storage', 'account', 'show-connection-string',
+                '--name', 'grantsgov58225',
+                '--resource-group', 'GrantsGovAPI',
+                '--query', 'connectionString',
+                '-o', 'tsv'
+            ], capture_output=True, text=True, check=False)
+            
+            if result.returncode == 0 and result.stdout.strip():
+                connection_string = result.stdout.strip()
+            else:
+                logger.error("Failed to get connection string from Azure CLI")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting connection string: {str(e)}")
+            return None
+    
+    return connection_string
+
+def safe_float(value, default=0.0):
+    """Convert value to float safely"""
+    if value is None or value == '':
+        return default
+    try:
+        if isinstance(value, str):
+            # Handle dollar sign and commas in currency
+            value = value.replace('$', '').replace(',', '')
+            value = re.sub(r'[^0-9\.\-]', '', value)
+            if value == '' or value == '.' or value == '-' or value == '-.':
+                return default
+        return float(value)
+    except (ValueError, TypeError):
+        logger.warning(f"Could not convert value to float: {value}")
+        return default
+
+def safe_int(value, default=0):
+    """Convert value to int safely"""
+    try:
+        if isinstance(value, str):
+            # Remove any non-numeric characters
+            value = re.sub(r'[^0-9\-]', '', value)
+            if not value:
+                return default
+        return int(float(value))
+    except (ValueError, TypeError):
+        logger.warning(f"Could not convert value to int: {value}")
+        return default
+
+def get_api_grant_details(grant_id):
+    """Get details from Grants.gov API"""
+    try:
+        url = f"https://api.grants.gov/v1/api/search2/detail/{grant_id}"
+        headers = {"Content-Type": "application/json"}
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Check for error code
+            if data.get("errorcode", 0) != 0:
+                logger.warning(f"API returned error for grant {grant_id}: {data.get('msg', 'Unknown error')}")
+                return None
+            
+            # Extract opportunity details
+            if "data" in data and "opportunity" in data["data"]:
+                return data["data"]["opportunity"]
+        
+        logger.warning(f"API returned status {response.status_code} for grant {grant_id}")
+        return None
+    except Exception as e:
+        logger.error(f"Error getting API details for grant {grant_id}: {str(e)}")
+        return None
+
+def fix_grant(entity, table_client):
+    """Fix data issues in a grant entity"""
+    grant_id = entity['RowKey']
+    updates = {}
+    modified = False
+    
+    # Check for missing or incorrect award amounts
+    ceiling = entity.get('AwardCeiling')
+    floor = entity.get('AwardFloor')
+    
+    # If both are missing or zero, try to get from API
+    needs_api_fetch = (ceiling is None or ceiling == 0 or ceiling == '0' or ceiling == '0.0' or
+                       floor is None or floor == 0 or floor == '0' or floor == '0.0')
+    
+    # Also check for missing expected number of awards
+    expected_awards = entity.get('ExpectedNumberofAwards')
+    if not expected_awards and entity.get('ExpectedAwards'):
+        updates['ExpectedNumberofAwards'] = entity.get('ExpectedAwards')
+        modified = True
+    
+    if not entity.get('ExpectedAwards') and entity.get('ExpectedNumberofAwards'):
+        updates['ExpectedAwards'] = entity.get('ExpectedNumberofAwards')
+        modified = True
+    
+    # If any critical fields missing, fetch from API
+    if needs_api_fetch:
+        logger.info(f"Fetching API data for grant {grant_id} to fix missing values")
+        api_data = get_api_grant_details(grant_id)
+        
+        if api_data:
+            # Fix award ceiling/floor
+            if api_data.get('awardCeiling'):
+                ceiling_value = safe_float(api_data.get('awardCeiling'))
+                if ceiling_value > 0:
+                    updates['AwardCeiling'] = ceiling_value
+                    modified = True
+            
+            if api_data.get('awardFloor'):
+                floor_value = safe_float(api_data.get('awardFloor'))
+                if floor_value > 0 or (ceiling_value > 0 and floor_value == 0):
+                    updates['AwardFloor'] = floor_value
+                    modified = True
+            
+            # Fix expected awards
+            if api_data.get('expectedNumOfAwards'):
+                awards_value = safe_int(api_data.get('expectedNumOfAwards'))
+                updates['ExpectedNumberofAwards'] = awards_value
+                updates['ExpectedAwards'] = awards_value
+                modified = True
+                
+            # Fix funding type
+            if api_data.get('fundingInstrumentType') and not entity.get('FundingType'):
+                updates['FundingType'] = api_data.get('fundingInstrumentType')
+                modified = True
+                
+            # Fix program funding
+            if api_data.get('estimatedTotalProgramFunding'):
+                funding_value = safe_float(api_data.get('estimatedTotalProgramFunding'))
+                if funding_value > 0:
+                    updates['EstimatedTotalProgramFunding'] = funding_value
+                    modified = True
+    
+    # Ensure AwardFloor <= AwardCeiling
+    if 'AwardFloor' in updates and 'AwardCeiling' in updates:
+        if updates['AwardFloor'] > updates['AwardCeiling'] and updates['AwardCeiling'] > 0:
+            logger.warning(f"Grant {grant_id}: Award floor {updates['AwardFloor']} > ceiling {updates['AwardCeiling']}. Swapping values.")
+            updates['AwardFloor'], updates['AwardCeiling'] = updates['AwardCeiling'], updates['AwardFloor']
+    
+    # Update entity if modified
+    if modified:
+        # Add timestamp
+        updates['LastFixed'] = datetime.now().isoformat()
+        updates['PartitionKey'] = entity['PartitionKey']
+        updates['RowKey'] = entity['RowKey']
+        
+        try:
+            table_client.update_entity(mode=UpdateMode.MERGE, entity=updates)
+            logger.info(f"Updated grant {grant_id} with fixes: {updates}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating grant {grant_id}: {str(e)}")
+            return False
+    else:
+        logger.debug(f"No fixes needed for grant {grant_id}")
+        return False
+
+def main():
+    """Fix data issues in Azure Table"""
+    connection_string = get_connection_string()
+    if not connection_string:
+        logger.error("No connection string available")
+        return False
+    
+    try:
+        # Connect to Azure Table
+        logger.info("Connecting to Azure Table Storage...")
+        table_service = TableServiceClient.from_connection_string(connection_string)
+        table_client = table_service.get_table_client("GrantDetails")
+        
+        # Get all grants
+        logger.info("Fetching all grants from Azure Table...")
+        grants = list(table_client.query_entities("PartitionKey eq 'Grant'"))
+        total_grants = len(grants)
+        logger.info(f"Found {total_grants} grants to check")
+        
+        # Track stats
+        fixed_count = 0
+        error_count = 0
+        
+        # Process each grant
+        for i, grant in enumerate(grants):
+            try:
+                if fix_grant(grant, table_client):
+                    fixed_count += 1
+                
+                # Progress update
+                if (i + 1) % 50 == 0 or i + 1 == total_grants:
+                    logger.info(f"Progress: {i+1}/{total_grants} grants processed, {fixed_count} fixed, {error_count} errors")
+            except Exception as e:
+                error_count += 1
+                logger.error(f"Error processing grant {grant.get('RowKey', 'unknown')}: {str(e)}")
+        
+        # Final stats
+        logger.info(f"\nFix complete! {fixed_count} grants fixed out of {total_grants} total grants.")
+        logger.info(f"Errors encountered: {error_count}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error fixing grants: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
+
+if __name__ == "__main__":
+    main()
