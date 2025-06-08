@@ -2,11 +2,13 @@ import azure.functions as func
 import logging
 import json
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from azure.data.tables import TableServiceClient, TableEntity
 from azure.storage.queue import QueueServiceClient
 from datetime import datetime, timedelta
 import pandas as pd
+import re
+import math
 
 def main(msg: func.QueueMessage) -> None:
     """
@@ -26,7 +28,7 @@ def main(msg: func.QueueMessage) -> None:
             return  # Don't re-raise for malformed messages
         
         # Validate required environment variables
-        connection_string = os.environ.get('STORAGE_CONNECTION_STRING')
+        connection_string = os.environ.get('STORAGE_CONNECTION_STRING') or os.environ.get('AzureWebJobsStorage')
         if not connection_string:
             logging.error("STORAGE_CONNECTION_STRING environment variable not set")
             return
@@ -79,13 +81,25 @@ def process_grants_data(table_client, request_data) -> Dict[str, int]:
         if data_source == 'csv':
             csv_path = request_data.get('csv_path')
             if not csv_path:
-                # Use absolute path for local development
-                csv_path = '/Users/dinghali/Desktop/Runwei/grants_gov_api_azure/src/scripts/grants-gov-opp-search--20250530141151.csv'
-            
-            # Validate CSV exists before processing
-            if not os.path.exists(csv_path):
-                logging.error(f"CSV file not found: {csv_path}")
-                return {'processed': 0, 'failed': 0, 'error': 'CSV file not found'}
+                # ✅ Fixed: Use relative path that works in Azure
+                csv_path = 'grants-gov-opp-search.csv'
+                # Check if file exists in multiple locations
+                possible_paths = [
+                    csv_path,
+                    f'/tmp/{csv_path}',
+                    f'/home/site/wwwroot/{csv_path}',
+                    'data/grants-gov-opp-search.csv'
+                ]
+                
+                csv_path = None
+                for path in possible_paths:
+                    if os.path.exists(path):
+                        csv_path = path
+                        break
+                
+                if not csv_path:
+                    logging.error("CSV file not found in any expected location")
+                    return {'processed': 0, 'failed': 0, 'error': 'CSV file not found'}
             
             grants_data = load_grants_from_csv(csv_path)
         else:
@@ -95,15 +109,14 @@ def process_grants_data(table_client, request_data) -> Dict[str, int]:
             logging.warning("No grants data to process")
             return {'processed': 0, 'failed': 0, 'message': 'No data to process'}
         
-        # Optimized batch processing with Azure Table Storage best practices
+        # Process grants using the transformation function
         processed_count = 0
         failed_count = 0
-        batch_size = 10  # Optimal batch size for Azure Table Storage
+        batch_size = 10
         
         total_grants = len(grants_data)
         logging.info(f"Starting to process {total_grants} grants in batches of {batch_size}")
         
-        # Process in batches to optimize Azure Table Storage operations
         for i in range(0, len(grants_data), batch_size):
             batch = grants_data[i:i + batch_size]
             batch_num = i // batch_size + 1
@@ -111,31 +124,34 @@ def process_grants_data(table_client, request_data) -> Dict[str, int]:
             
             logging.info(f"Processing batch {batch_num}/{total_batches}: {len(batch)} grants")
             
-            # Process each grant in the batch
             for grant in batch:
                 try:
-                    # Transform grant data to table entity
-                    entity = transform_grant_to_entity(grant)
-                    
-                    # Upsert to table with retry logic for resilience
-                    max_retries = 3
-                    for attempt in range(max_retries):
-                        try:
-                            table_client.upsert_entity(entity)
-                            processed_count += 1
-                            break
-                        except Exception as retry_e:
-                            if attempt == max_retries - 1:
-                                logging.error(f"Failed after {max_retries} attempts: {grant.get('opportunity_id', 'unknown')}")
-                                failed_count += 1
-                            else:
-                                logging.warning(f"Retry {attempt + 1} for grant {grant.get('opportunity_id', 'unknown')}: {str(retry_e)}")
+                    # ✅ Fixed: Use the transform function properly
+                    transformed_grant = transform_single_record(grant)
+                    if transformed_grant:
+                        entity = transform_grant_to_entity(transformed_grant)
+                        
+                        # Upsert to table with retry logic
+                        max_retries = 3
+                        for attempt in range(max_retries):
+                            try:
+                                table_client.upsert_entity(entity)
+                                processed_count += 1
+                                break
+                            except Exception as retry_e:
+                                if attempt == max_retries - 1:
+                                    logging.error(f"Failed after {max_retries} attempts: {grant.get('opportunity_id', 'unknown')}")
+                                    failed_count += 1
+                                else:
+                                    logging.warning(f"Retry {attempt + 1}: {str(retry_e)}")
+                    else:
+                        failed_count += 1
                     
                 except Exception as e:
                     logging.error(f"Failed to process grant {grant.get('opportunity_id', 'unknown')}: {str(e)}")
                     failed_count += 1
             
-            # Small delay between batches to prevent throttling
+            # Small delay between batches
             if batch_num < total_batches:
                 import time
                 time.sleep(0.1)
@@ -159,7 +175,7 @@ def load_grants_from_csv(csv_path) -> List[Dict]:
     try:
         logging.info(f"Loading CSV from: {csv_path}")
         
-        # Try multiple encodings for maximum compatibility
+        # Try multiple encodings
         encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
         df = None
         
@@ -183,46 +199,37 @@ def load_grants_from_csv(csv_path) -> List[Dict]:
         
         logging.info(f"CSV loaded successfully: {len(df)} rows")
         
-        # Convert to list of dictionaries with enhanced data validation
         grants_data = []
         skipped_rows = 0
         
         for idx, row in df.iterrows():
             try:
-                # Extract opportunity ID from HYPERLINK formula if present
-                opportunity_number = str(row.get('OPPORTUNITY NUMBER', ''))
-                if 'HYPERLINK' in opportunity_number and '","' in opportunity_number:
-                    # Extract the opportunity ID from =HYPERLINK("url","ID") format
-                    opportunity_id = opportunity_number.split('","')[1].replace('")', '')
-                else:
-                    opportunity_id = opportunity_number.strip()
+                # ✅ Fixed: Proper opportunity ID extraction
+                opportunity_id = extract_opportunity_id(str(row.get('OPPORTUNITY NUMBER', '')))
                 
-                # Skip rows without valid opportunity ID
-                if not opportunity_id or opportunity_id.lower() in ['nan', 'none', '', 'null']:
+                if not opportunity_id:
                     skipped_rows += 1
                     continue
                 
-                # Create grant object with safe string conversion
+                # Create grant object with proper field mapping
                 grant = {
-                    'opportunity_id': opportunity_id,
-                    'opportunity_title': safe_str(row.get('OPPORTUNITY TITLE', '')),
-                    'agency_code': safe_str(row.get('AGENCY CODE', '')),
-                    'agency_name': safe_str(row.get('AGENCY NAME', '')),
-                    'category_of_funding_activity': safe_str(row.get('CATEGORY OF FUNDING ACTIVITY', '')),
-                    'funding_instrument_type': safe_str(row.get('FUNDING INSTRUMENT TYPE', '')),
-                    'estimated_total_funding': safe_str(row.get('ESTIMATED TOTAL FUNDING', '')),
-                    'expected_number_of_awards': safe_str(row.get('EXPECTED NUMBER OF AWARDS', '')),
-                    'award_ceiling': safe_str(row.get('AWARD CEILING', '')),
-                    'award_floor': safe_str(row.get('AWARD FLOOR', '')),
-                    'cost_sharing_match_requirement': safe_str(row.get('COST SHARING / MATCH REQUIREMENT', '')),
-                    'link_to_additional_information': safe_str(row.get('LINK TO ADDITIONAL INFORMATION', '')),
-                    'grantor_contact': safe_str(row.get('GRANTOR CONTACT', '')),
-                    'grantor_contact_email': safe_str(row.get('GRANTOR CONTACT EMAIL', '')),
-                    'posted_date': safe_str(row.get('POSTED DATE', '')),
-                    'close_date': safe_str(row.get('CLOSE DATE', '')),
-                    'opportunity_status': safe_str(row.get('OPPORTUNITY STATUS', '')),
-                    'funding_description': safe_str(row.get('FUNDING DESCRIPTION', ''))[:2000],
-                    'eligible_applicants': safe_str(row.get('ELIGIBLE APPLICANTS', ''))
+                    'OPPORTUNITY NUMBER': opportunity_id,
+                    'OPPORTUNITY TITLE': safe_str(row.get('OPPORTUNITY TITLE', '')),
+                    'AGENCY CODE': safe_str(row.get('AGENCY CODE', '')),
+                    'AGENCY NAME': safe_str(row.get('AGENCY NAME', '')),
+                    'CATEGORY OF FUNDING ACTIVITY': safe_str(row.get('CATEGORY OF FUNDING ACTIVITY', '')),
+                    'FUNDING INSTRUMENT TYPE': safe_str(row.get('FUNDING INSTRUMENT TYPE', '')),
+                    'ESTIMATED TOTAL FUNDING': safe_str(row.get('ESTIMATED TOTAL FUNDING', '')),
+                    'EXPECTED NUMBER OF AWARDS': safe_str(row.get('EXPECTED NUMBER OF AWARDS', '')),
+                    'AWARD CEILING': safe_str(row.get('AWARD CEILING', '')),
+                    'AWARD FLOOR': safe_str(row.get('AWARD FLOOR', '')),
+                    'LINK TO ADDITIONAL INFORMATION': safe_str(row.get('LINK TO ADDITIONAL INFORMATION', '')),
+                    'GRANTOR CONTACT EMAIL': safe_str(row.get('GRANTOR CONTACT EMAIL', '')),
+                    'POSTED DATE': safe_str(row.get('POSTED DATE', '')),
+                    'CLOSE DATE': safe_str(row.get('CLOSE DATE', '')),
+                    'FUNDING DESCRIPTION': safe_str(row.get('FUNDING DESCRIPTION', ''))[:2000],
+                    'ELIGIBLE APPLICANTS': safe_str(row.get('ELIGIBLE APPLICANTS', '')),
+                    'ASSISTANCE LISTINGS': safe_str(row.get('ASSISTANCE LISTINGS', ''))
                 }
                 grants_data.append(grant)
                 
@@ -238,56 +245,248 @@ def load_grants_from_csv(csv_path) -> List[Dict]:
         logging.error(f"Error loading CSV: {str(e)}")
         raise
 
+# ===== MISSING HELPER FUNCTIONS - NOW IMPLEMENTED =====
+
+def extract_opportunity_id(opportunity_number: str) -> str:
+    """Extract opportunity ID from various formats"""
+    if not opportunity_number:
+        return ''
+    
+    # Handle HYPERLINK formulas: =HYPERLINK("url","ID")
+    if 'HYPERLINK' in opportunity_number and '","' in opportunity_number:
+        try:
+            parts = opportunity_number.split('","')
+            if len(parts) >= 2:
+                return parts[1].replace('")', '').strip()
+        except:
+            pass
+    
+    # Clean and validate the opportunity ID
+    cleaned = str(opportunity_number).strip()
+    
+    # Remove common invalid values
+    if cleaned.lower() in ['nan', 'none', '', 'null']:
+        return ''
+    
+    return cleaned
+
+def clean_text(text: str) -> str:
+    """Clean text for display and storage"""
+    if not text:
+        return ''
+    
+    # Convert to string and strip whitespace
+    cleaned = str(text).strip()
+    
+    # Remove excessive whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    
+    # Remove null-like values
+    if cleaned.lower() in ['nan', 'none', 'null']:
+        return ''
+    
+    return cleaned
+
+def transform_date(date_str: str) -> str:
+    """Transform date string to ISO format"""
+    if not date_str or str(date_str).lower() in ['nan', 'none', 'null', '']:
+        return ''
+    
+    try:
+        # Common date formats in grants data
+        date_formats = [
+            '%m/%d/%Y',    # 12/31/2024
+            '%Y-%m-%d',    # 2024-12-31
+            '%m-%d-%Y',    # 12-31-2024
+            '%d/%m/%Y',    # 31/12/2024
+            '%B %d, %Y',   # December 31, 2024
+            '%b %d, %Y',   # Dec 31, 2024
+            '%Y/%m/%d'     # 2024/12/31
+        ]
+        
+        date_str = str(date_str).strip()
+        
+        for fmt in date_formats:
+            try:
+                date_obj = datetime.strptime(date_str, fmt)
+                return date_obj.isoformat()
+            except ValueError:
+                continue
+        
+        # If no format matched, return original
+        return date_str
+        
+    except Exception as e:
+        logging.warning(f"Date transformation failed for '{date_str}': {str(e)}")
+        return str(date_str)
+
+def safe_float(value) -> float:
+    """Safely convert value to float"""
+    if pd.isna(value) or value is None or value == '':
+        return 0.0
+    
+    try:
+        # Handle string values with currency symbols and commas
+        if isinstance(value, str):
+            # Remove currency symbols and commas
+            cleaned = re.sub(r'[^\d.-]', '', value)
+            if not cleaned:
+                return 0.0
+            return float(cleaned)
+        
+        return float(value)
+    except (ValueError, TypeError):
+        return 0.0
+
 def safe_str(value) -> str:
     """Safely convert value to string, handling NaN and None values"""
     if pd.isna(value) or value is None:
         return ''
     return str(value).strip()
 
-def transform_grant_to_entity(grant) -> Dict:
-    """Transform grant data to Azure Table entity with optimized field mapping"""
+# ===== MAPPING FUNCTIONS =====
+
+def map_opportunity_gap(category: str) -> str:
+    """Map funding category to opportunity gap"""
+    if not category:
+        return ''
+    
+    category_lower = str(category).lower()
+    
+    gap_mapping = {
+        'research': 'Research & Development',
+        'technology': 'Technology Innovation',
+        'education': 'Education & Training',
+        'health': 'Healthcare & Wellness',
+        'environment': 'Environmental Sustainability',
+        'agriculture': 'Agriculture & Food Security',
+        'energy': 'Energy & Infrastructure',
+        'economic': 'Economic Development',
+        'social': 'Social Services',
+        'transportation': 'Transportation & Infrastructure'
+    }
+    
+    for key, gap in gap_mapping.items():
+        if key in category_lower:
+            return gap
+    
+    return 'General Funding'
+
+def map_opportunity_type(instrument_type: str) -> str:
+    """Map funding instrument to opportunity type"""
+    if not instrument_type:
+        return 'Grant'
+    
+    instrument_lower = str(instrument_type).lower()
+    
+    if 'grant' in instrument_lower:
+        return 'Grant'
+    elif 'loan' in instrument_lower:
+        return 'Loan'
+    elif 'cooperative' in instrument_lower or 'agreement' in instrument_lower:
+        return 'Cooperative Agreement'
+    elif 'contract' in instrument_lower:
+        return 'Contract'
+    else:
+        return 'Grant'
+
+def determine_global_eligibility(eligible_applicants: str) -> bool:
+    """Determine if opportunity is globally available"""
+    if not eligible_applicants:
+        return False
+    
+    applicants_lower = str(eligible_applicants).lower()
+    
+    # Check for international eligibility indicators
+    international_indicators = [
+        'international', 'global', 'worldwide', 'foreign',
+        'non-us', 'overseas', 'multinational'
+    ]
+    
+    return any(indicator in applicants_lower for indicator in international_indicators)
+
+def extract_target_community(eligible_applicants: str) -> str:
+    """Extract target community from eligibility text"""
+    if not eligible_applicants:
+        return ''
+    
+    applicants_lower = str(eligible_applicants).lower()
+    
+    community_mapping = {
+        'small business': 'Small Business',
+        'minority': 'Minority-Owned Business',
+        'women': 'Women-Owned Business',
+        'veteran': 'Veteran-Owned Business',
+        'university': 'Academic Institutions',
+        'nonprofit': 'Nonprofit Organizations',
+        'tribal': 'Tribal Organizations',
+        'rural': 'Rural Communities',
+        'urban': 'Urban Communities'
+    }
+    
+    for key, community in community_mapping.items():
+        if key in applicants_lower:
+            return community
+    
+    return 'General Public'
+
+def map_industry(category: str) -> str:
+    """Map funding category to industry"""
+    if not category:
+        return ''
+    
+    category_lower = str(category).lower()
+    
+    industry_mapping = {
+        'science': 'Science & Technology',
+        'technology': 'Technology',
+        'health': 'Healthcare',
+        'education': 'Education',
+        'environment': 'Environmental',
+        'agriculture': 'Agriculture',
+        'energy': 'Energy',
+        'transportation': 'Transportation',
+        'manufacturing': 'Manufacturing',
+        'defense': 'Defense',
+        'aerospace': 'Aerospace'
+    }
+    
+    for key, industry in industry_mapping.items():
+        if key in category_lower:
+            return industry
+    
+    return 'General'
+
+def transform_grant_to_entity(grant_data: Dict) -> TableEntity:
+    """Transform grant data to Azure Table Storage entity"""
     try:
-        # Create partition key (agency code) and row key (opportunity ID)
-        partition_key = safe_str(grant.get('agency_code', 'UNKNOWN'))
-        row_key = safe_str(grant.get('opportunity_id', f"GRANT_{datetime.utcnow().isoformat()}"))
+        # Use opportunity ID as both partition and row key for simplicity
+        opportunity_id = str(grant_data.get('SourceID', grant_data.get('OpportunityURL', '').split('/')[-1]))
         
-        # Clean keys for Azure Table Storage compatibility
-        partition_key = clean_table_key(partition_key)
-        row_key = clean_table_key(row_key)
+        entity = TableEntity()
+        entity['PartitionKey'] = 'Grant'
+        entity['RowKey'] = clean_table_key(opportunity_id)
         
-        # Ensure keys are not empty and within Azure limits
-        if not partition_key:
-            partition_key = 'UNKNOWN'
-        if not row_key:
-            row_key = f"GRANT_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        # Add all grant data fields with proper type conversion
+        for key, value in grant_data.items():
+            # Clean field names for Azure Table Storage
+            clean_key = clean_table_key(key)
+            if clean_key and clean_key not in ['PartitionKey', 'RowKey']:
+                # Handle different data types
+                if isinstance(value, (list, dict)):
+                    entity[clean_key] = json.dumps(value)
+                elif isinstance(value, (int, float)):
+                    entity[clean_key] = value
+                elif isinstance(value, bool):
+                    entity[clean_key] = value
+                else:
+                    # Convert to string and truncate if too long
+                    str_value = str(value)[:1000] if value else ''
+                    entity[clean_key] = str_value
         
-        # Create entity with optimized field lengths for Azure Table Storage
-        entity = {
-            'PartitionKey': partition_key[:1024],
-            'RowKey': row_key[:1024],
-            'OpportunityId': safe_str(grant.get('opportunity_id', ''))[:1024],
-            'Title': safe_str(grant.get('opportunity_title', ''))[:1024],
-            'AgencyCode': safe_str(grant.get('agency_code', ''))[:256],
-            'AgencyName': safe_str(grant.get('agency_name', ''))[:512],
-            'Category': safe_str(grant.get('category_of_funding_activity', ''))[:256],
-            'FundingInstrumentType': safe_str(grant.get('funding_instrument_type', ''))[:256],
-            'EstimatedTotalFunding': safe_str(grant.get('estimated_total_funding', ''))[:256],
-            'ExpectedNumberOfAwards': safe_str(grant.get('expected_number_of_awards', ''))[:256],
-            'AwardCeiling': safe_str(grant.get('award_ceiling', ''))[:256],
-            'AwardFloor': safe_str(grant.get('award_floor', ''))[:256],
-            'CostSharingRequired': safe_str(grant.get('cost_sharing_match_requirement', ''))[:256],
-            'AdditionalInfoLink': safe_str(grant.get('link_to_additional_information', ''))[:1024],
-            'GrantorContact': safe_str(grant.get('grantor_contact', ''))[:512],
-            'GrantorEmail': safe_str(grant.get('grantor_contact_email', ''))[:256],
-            'PostedDate': safe_str(grant.get('posted_date', ''))[:256],
-            'CloseDate': safe_str(grant.get('close_date', ''))[:256],
-            'Status': safe_str(grant.get('opportunity_status', ''))[:256],
-            'Description': safe_str(grant.get('funding_description', ''))[:30000],  # Azure Table limit
-            'EligibleApplicants': safe_str(grant.get('eligible_applicants', ''))[:10000],
-            'LastUpdated': datetime.utcnow(),
-            'DataSource': 'grants.gov',
-            'ProcessedAt': datetime.utcnow().isoformat()
-        }
+        # Add metadata
+        entity['LastUpdated'] = datetime.utcnow()
+        entity['ProcessedDate'] = datetime.utcnow()
         
         return entity
         
@@ -301,13 +500,285 @@ def clean_table_key(key: str) -> str:
         return ''
     
     # Remove invalid characters for Azure Table Storage
-    # Valid characters: letters, digits, and certain special characters
-    cleaned = ''.join(c for c in key if c.isalnum() or c in '-_.')
+    cleaned = ''.join(c for c in str(key) if c.isalnum() or c in '-_.')
     
     # Ensure key doesn't start or end with invalid characters
     cleaned = cleaned.strip('-_.')
     
     return cleaned[:1024]  # Azure Table Storage key limit
+
+# ===== KEEP EXISTING FUNCTIONS =====
+
+def transform_single_record(source_record: Dict) -> Optional[Dict]:
+    """Transform a single grant record to company schema with complete database design alignment"""
+    
+    try:
+        # Extract opportunity ID
+        opportunity_id = extract_opportunity_id(source_record.get('OPPORTUNITY NUMBER', ''))
+        if not opportunity_id:
+            return None
+        
+        # Map fields to new schema following DATABASE DESIGN ORDER + additional fields
+        transformed = {
+            # === DATABASE DESIGN PRIORITY ORDER ===
+            
+            # General Section (High Priority)
+            "OpportunityURL": f"https://www.grants.gov/search-results-detail/{opportunity_id}",
+            "Title": clean_text(source_record.get('OPPORTUNITY TITLE', '')),
+            "Deadline": transform_date(source_record.get('CLOSE DATE', '')),
+            "TimeZone": "EST",
+            
+            # Financial Information (High Priority)
+            "AwardValue": safe_float(source_record.get('AWARD CEILING', 0)),
+            "CashAward": safe_float(source_record.get('AWARD CEILING', 0)),
+            
+            # Application Details (High Priority)
+            "DirectLinkToApplyURL": f"https://www.grants.gov/search-results-detail/{opportunity_id}",
+            
+            # Opportunity Details (High Priority)
+            "OpportunityGap": map_opportunity_gap(source_record.get('CATEGORY OF FUNDING ACTIVITY', '')),
+            "Type": map_opportunity_type(source_record.get('FUNDING INSTRUMENT TYPE', '')),
+            
+            # Geographic Eligibility (High Priority)
+            "GlobalOpportunity": determine_global_eligibility(source_record.get('ELIGIBLE APPLICANTS', '')),
+            "GlobalLocations": "North America",
+            "CountriesEligible": "United States",
+            "LocationDetails": "United States",
+            
+            # Detailed Information (High Priority)
+            "ShortDescription": clean_text(source_record.get('FUNDING DESCRIPTION', ''))[:500],
+            "Eligibility": clean_text(source_record.get('ELIGIBLE APPLICANTS', '')),
+            "LongDescription": clean_text(source_record.get('FUNDING DESCRIPTION', '')),
+            "TargetCommunity": extract_target_community(source_record.get('ELIGIBLE APPLICANTS', '')),
+            "OpportunityLogoURL": "",
+            "DatePosted": transform_date(source_record.get('POSTED DATE', '')),
+            "Industry": map_industry(source_record.get('CATEGORY OF FUNDING ACTIVITY', '')),
+            
+            # === MISSING COLUMNS FROM DATABASE DESIGN ===
+            "UNSDGAlignment": map_un_sdg_alignment(source_record.get('CATEGORY OF FUNDING ACTIVITY', ''), source_record.get('FUNDING DESCRIPTION', '')),
+            
+            # Additional Information (Medium Priority)
+            "ServiceProviderESO": clean_text(source_record.get('AGENCY NAME', '')),
+            "ESOWebsite": source_record.get('LINK TO ADDITIONAL INFORMATION', ''),
+            "ContactEmailForOpportunity": source_record.get('GRANTOR CONTACT EMAIL', ''),
+            
+            # Internal Review (Medium Priority)
+            "Cost": 0.0,
+            "FinancialTermsOrCostList": "Grant",
+            "FinancialTerms": f"Award Range: ${safe_float(source_record.get('AWARD FLOOR', 0)):,.0f} - ${safe_float(source_record.get('AWARD CEILING', 0)):,.0f}",
+            "OpportunityRating": calculate_opportunity_rating(source_record),
+            "ProviderRating": calculate_provider_rating(source_record.get('AGENCY NAME', '')),
+            
+            # === ADDITIONAL METADATA (Lower Priority) ===
+            "SourceSystem": "Grants.gov",
+            "SourceID": opportunity_id,
+            "AgencyCode": source_record.get('AGENCY CODE', ''),
+            "CFDANumbers": source_record.get('ASSISTANCE LISTINGS', ''),
+            "ExpectedAwards": source_record.get('EXPECTED NUMBER OF AWARDS', ''),
+            "TotalFunding": source_record.get('ESTIMATED TOTAL FUNDING', ''),
+            "LastUpdated": datetime.utcnow().isoformat(),
+            "ProcessingDate": datetime.utcnow().isoformat(),
+            
+            # === ENHANCED ANALYTICS FIELDS ===
+            "CompetitionLevel": calculate_competition_level(source_record),
+            "FundingAmountNormalized": normalize_funding_amount(source_record.get('AWARD CEILING', 0)),
+            "DeadlineUrgency": calculate_deadline_urgency(source_record.get('CLOSE DATE', '')),
+            "EligibilityMatchScore": calculate_eligibility_match_score(source_record.get('ELIGIBLE APPLICANTS', '')),
+            "AgencyScore": calculate_agency_score(source_record.get('AGENCY NAME', '')),
+            "KeywordMatches": extract_keyword_matches(source_record.get('FUNDING DESCRIPTION', ''))
+        }
+        
+        return transformed
+        
+    except Exception as e:
+        logging.warning(f"Error transforming record: {str(e)}")
+        return None
+
+# ===== KEEP ALL YOUR EXISTING FUNCTIONS =====
+# map_un_sdg_alignment, calculate_opportunity_rating, calculate_provider_rating, etc.
+# (All the functions you already have are kept as-is)
+
+def map_un_sdg_alignment(category: str, description: str) -> List[str]:
+    """Map grant content to UN Sustainable Development Goals"""
+    
+    sdg_mapping = {
+        "1": ["poverty", "economic development", "income"],
+        "2": ["agriculture", "food", "hunger", "nutrition"],
+        "3": ["health", "medical", "wellness", "disease"],
+        "4": ["education", "training", "learning", "school"],
+        "5": ["gender", "women", "equality"],
+        "6": ["water", "sanitation", "clean water"],
+        "7": ["energy", "renewable", "clean energy"],
+        "8": ["economic", "employment", "jobs", "growth"],
+        "9": ["infrastructure", "innovation", "technology"],
+        "10": ["inequality", "inclusion", "equity"],
+        "11": ["cities", "urban", "communities", "sustainable"],
+        "12": ["consumption", "production", "waste", "recycling"],
+        "13": ["climate", "environmental", "carbon"],
+        "14": ["ocean", "marine", "sea", "aquatic"],
+        "15": ["biodiversity", "ecosystem", "forest", "land"],
+        "16": ["peace", "justice", "institutions", "governance"],
+        "17": ["partnership", "collaboration", "global"]
+    }
+    
+    content = f"{category} {description}".lower()
+    aligned_sdgs = []
+    
+    for sdg, keywords in sdg_mapping.items():
+        if any(keyword in content for keyword in keywords):
+            aligned_sdgs.append(f"SDG {sdg}")
+    
+    return aligned_sdgs[:3]
+
+def calculate_opportunity_rating(source_record: Dict) -> float:
+    """Calculate opportunity rating based on multiple factors"""
+    
+    rating = 5.0
+    
+    # Factor 1: Award amount
+    award_amount = safe_float(source_record.get('AWARD CEILING', 0))
+    if award_amount > 1000000:
+        rating += 1.0
+    elif award_amount > 500000:
+        rating += 0.5
+    elif award_amount < 50000:
+        rating -= 0.5
+    
+    # Factor 2: Competition level
+    expected_awards = safe_float(source_record.get('EXPECTED NUMBER OF AWARDS', 1))
+    if expected_awards > 50:
+        rating += 0.5
+    elif expected_awards < 5:
+        rating -= 0.5
+    
+    # Factor 3: Agency reputation
+    agency = source_record.get('AGENCY NAME', '').lower()
+    prestigious_agencies = ['nsf', 'nih', 'nasa', 'doe', 'darpa']
+    if any(agency_name in agency for agency_name in prestigious_agencies):
+        rating += 0.5
+    
+    # Factor 4: Deadline urgency
+    deadline = source_record.get('CLOSE DATE', '')
+    urgency = calculate_deadline_urgency(deadline)
+    if urgency > 180:
+        rating += 0.3
+    elif urgency < 30:
+        rating -= 0.5
+    
+    return min(max(rating, 1.0), 10.0)
+
+def calculate_provider_rating(agency_name: str) -> float:
+    """Calculate provider/agency rating"""
+    
+    agency = agency_name.lower()
+    
+    tier1_agencies = {
+        'national science foundation': 9.5,
+        'national institutes of health': 9.5,
+        'nasa': 9.0,
+        'department of energy': 8.5,
+        'darpa': 9.0
+    }
+    
+    tier2_agencies = {
+        'department of commerce': 8.0,
+        'department of defense': 8.5,
+        'usda': 7.5,
+        'epa': 8.0
+    }
+    
+    for tier1_agency, rating in tier1_agencies.items():
+        if tier1_agency in agency:
+            return rating
+    
+    for tier2_agency, rating in tier2_agencies.items():
+        if tier2_agency in agency:
+            return rating
+    
+    return 7.0
+
+def calculate_competition_level(source_record: Dict) -> str:
+    """Calculate competition level (Low/Medium/High)"""
+    
+    expected_awards = safe_float(source_record.get('EXPECTED NUMBER OF AWARDS', 1))
+    award_ceiling = safe_float(source_record.get('AWARD CEILING', 0))
+    
+    if expected_awards > 100:
+        return "Low"
+    elif expected_awards > 20:
+        return "Medium"
+    elif award_ceiling > 1000000:
+        return "High"
+    else:
+        return "Medium"
+
+def normalize_funding_amount(award_amount) -> float:
+    """Normalize funding amount for ML features (0-1 scale)"""
+    
+    amount = safe_float(award_amount)
+    
+    if amount <= 0:
+        return 0.0
+    
+    log_amount = math.log10(max(amount, 1000))
+    log_min = math.log10(1000)
+    log_max = math.log10(10000000)
+    
+    normalized = (log_amount - log_min) / (log_max - log_min)
+    return min(max(normalized, 0.0), 1.0)
+
+def calculate_deadline_urgency(deadline_str: str) -> int:
+    """Calculate days until deadline"""
+    
+    if not deadline_str:
+        return 365
+    
+    try:
+        deadline_date = datetime.strptime(transform_date(deadline_str)[:10], '%Y-%m-%d')
+        today = datetime.utcnow()
+        days_until = (deadline_date - today).days
+        return max(days_until, 0)
+    except:
+        return 365
+
+def calculate_eligibility_match_score(eligibility: str) -> float:
+    """Calculate how well eligibility matches common applicant types"""
+    
+    eligibility_lower = str(eligibility).lower()
+    
+    if 'unrestricted' in eligibility_lower or 'open to any' in eligibility_lower:
+        return 1.0
+    elif 'small business' in eligibility_lower:
+        return 0.9
+    elif 'nonprofit' in eligibility_lower:
+        return 0.8
+    elif 'university' in eligibility_lower or 'education' in eligibility_lower:
+        return 0.7
+    elif 'government' in eligibility_lower:
+        return 0.6
+    else:
+        return 0.5
+
+def calculate_agency_score(agency_name: str) -> float:
+    """Calculate agency score for ML features"""
+    
+    provider_rating = calculate_provider_rating(agency_name)
+    return provider_rating / 10.0
+
+def extract_keyword_matches(description: str) -> List[str]:
+    """Extract relevant keywords from description"""
+    
+    high_value_keywords = [
+        'innovation', 'technology', 'research', 'development', 'startup',
+        'entrepreneurship', 'small business', 'artificial intelligence',
+        'machine learning', 'sustainability', 'clean energy', 'healthcare',
+        'education', 'training', 'workforce development'
+    ]
+    
+    description_lower = str(description).lower()
+    matches = [keyword for keyword in high_value_keywords if keyword in description_lower]
+    
+    return matches[:5]
 
 def update_single_grant(table_client, request_data):
     """Update a single grant record with enhanced validation"""
@@ -317,10 +788,11 @@ def update_single_grant(table_client, request_data):
             logging.warning("No grant data provided for update")
             return
         
-        entity = transform_grant_to_entity(grant_data)
-        table_client.upsert_entity(entity)
-        
-        logging.info(f"Updated grant: {grant_data.get('opportunity_id', 'unknown')}")
+        transformed_grant = transform_single_record(grant_data)
+        if transformed_grant:
+            entity = transform_grant_to_entity(transformed_grant)
+            table_client.upsert_entity(entity)
+            logging.info(f"Updated grant: {grant_data.get('OPPORTUNITY NUMBER', 'unknown')}")
         
     except Exception as e:
         logging.error(f"Error updating single grant: {str(e)}")
@@ -329,17 +801,14 @@ def update_single_grant(table_client, request_data):
 def cleanup_old_grants(table_client, request_data):
     """Clean up old grant records with batch deletion optimization"""
     try:
-        # Define cutoff date
         cutoff_days = request_data.get('cutoff_days', 180)
         cutoff_date = datetime.utcnow() - timedelta(days=cutoff_days)
         
-        logging.info(f"Cleaning up grants older than {cutoff_days} days (before {cutoff_date.isoformat()})")
+        logging.info(f"Cleaning up grants older than {cutoff_days} days")
         
-        # Query old entities
         filter_query = f"LastUpdated lt datetime'{cutoff_date.isoformat()}'"
         old_entities = table_client.query_entities(filter_query)
         
-        # Delete old entities with batch processing
         deleted_count = 0
         failed_count = 0
         
@@ -348,7 +817,6 @@ def cleanup_old_grants(table_client, request_data):
                 table_client.delete_entity(entity['PartitionKey'], entity['RowKey'])
                 deleted_count += 1
                 
-                # Log progress every 100 deletions
                 if deleted_count % 100 == 0:
                     logging.info(f"Deleted {deleted_count} old records so far...")
                     
