@@ -1,0 +1,11 @@
+azure-functions
+azure-data-tables
+azure-storage-blob
+azure-storage-queue
+pandas
+requests
+python-dateutil
+pytz
+pyodbc
+sqlalchemy
+pymssql
