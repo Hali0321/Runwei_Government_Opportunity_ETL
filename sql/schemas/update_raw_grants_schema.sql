@@ -7,10 +7,17 @@ USE GrantsGovDB;
 GO
 
 PRINT '🔄 Updating RawGrantsLayer1 to match Azure Table Storage schema...';
-PRINT 'Adding all 28+ columns from grants.gov CSV structure';
+PRINT 'Adding OpportunityURL and other missing columns from storage account';
 PRINT '===============================================';
 
--- Check if RawGrantsLayer1 exists, if not create it
+-- First, let's check what exists
+PRINT 'Current table status:';
+IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'RawGrantsLayer1')
+    PRINT '✅ RawGrantsLayer1 table exists - will add missing columns'
+ELSE
+    PRINT '❌ RawGrantsLayer1 table does not exist - will create it'
+
+-- Create table if it doesn't exist
 IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'RawGrantsLayer1')
 BEGIN
     PRINT 'Creating RawGrantsLayer1 table with complete schema...';
@@ -21,24 +28,25 @@ BEGIN
         PartitionKey NVARCHAR(255) NOT NULL DEFAULT 'Grant',
         RowKey NVARCHAR(255) NOT NULL,
         
-        -- Core Grants.gov CSV Columns (exact match to your storage)
+        -- Core Grants.gov columns matching your Azure Storage
         OpportunityNumber NVARCHAR(255) NULL,
+        OpportunityURL NVARCHAR(2000) NULL,  -- 🆕 From your storage account
         Title NVARCHAR(1000) NULL,
         AgencyCode NVARCHAR(100) NULL,
         AgencyName NVARCHAR(500) NULL,
-        Category NVARCHAR(500) NULL, -- CATEGORY OF FUNDING ACTIVITY
-        CategoryExplanation NVARCHAR(2000) NULL, -- FUNDING CATEGORY EXPLANATION
-        FundingType NVARCHAR(255) NULL, -- FUNDING INSTRUMENT TYPE
-        CFDANumbers NVARCHAR(500) NULL, -- ASSISTANCE LISTINGS
+        Category NVARCHAR(500) NULL,
+        CategoryExplanation NVARCHAR(2000) NULL,
+        FundingType NVARCHAR(255) NULL,
+        CFDANumbers NVARCHAR(500) NULL,
         
         -- Financial Fields
         EstimatedTotalFunding DECIMAL(18,2) NULL,
         ExpectedAwards INT NULL,
         AwardCeiling DECIMAL(18,2) NULL,
         AwardFloor DECIMAL(18,2) NULL,
+        CostSharing NVARCHAR(500) NULL,
         
         -- Additional Information
-        CostSharing NVARCHAR(500) NULL,
         AdditionalInfoURL NVARCHAR(2000) NULL,
         GrantorContact NVARCHAR(500) NULL,
         GrantorPhone NVARCHAR(100) NULL,
@@ -49,23 +57,27 @@ BEGIN
         EstimatedDueDate DATETIME2 NULL,
         PostedDate DATETIME2 NULL,
         CloseDate DATETIME2 NULL,
+        LastUpdated DATETIME2 NULL,
         LastUpdatedOriginal DATETIME2 NULL,
         
-        -- Status and Version
+        -- Status and Version Fields
         Version NVARCHAR(50) NULL,
         Status NVARCHAR(100) NULL,
         Package NVARCHAR(500) NULL,
         SynopsisArchived NVARCHAR(50) NULL,
+        DataVersion NVARCHAR(50) NULL,
         
-        -- Long Text Fields
+        -- Content Fields
         Description NVARCHAR(MAX) NULL,
         EligibleApplicants NVARCHAR(MAX) NULL,
         
-        -- Processing Metadata
+        -- Processing Metadata (from your storage)
         ProcessedDate DATETIME2 NULL,
+        ProcessedBy NVARCHAR(255) NULL,
         ProcessingTimestamp NVARCHAR(50) NULL,
         SourceType NVARCHAR(50) NULL,
         TotalColumns INT NULL,
+        Timestamp DATETIME2 NULL,
         
         -- System Fields
         CreatedDate DATETIME2 DEFAULT GETDATE(),
@@ -74,61 +86,118 @@ BEGIN
         CONSTRAINT UQ_RawGrants_RowKey UNIQUE (RowKey)
     );
     
-    PRINT '✅ RawGrantsLayer1 created with complete schema (28+ columns)';
+    PRINT '✅ RawGrantsLayer1 created with complete schema including OpportunityURL';
 END
 ELSE
 BEGIN
-    PRINT 'RawGrantsLayer1 exists, checking for missing columns...';
+    PRINT 'Table exists - adding missing columns individually...';
     
-    -- Add missing columns if they don't exist
-    DECLARE @sql NVARCHAR(MAX) = '';
-    
-    -- Check and add columns dynamically
-    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'CategoryExplanation')
-        SET @sql = @sql + 'ALTER TABLE RawGrantsLayer1 ADD CategoryExplanation NVARCHAR(2000) NULL;' + CHAR(13);
-    
-    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'CFDANumbers')
-        SET @sql = @sql + 'ALTER TABLE RawGrantsLayer1 ADD CFDANumbers NVARCHAR(500) NULL;' + CHAR(13);
-        
-    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'EstimatedTotalFunding')
-        SET @sql = @sql + 'ALTER TABLE RawGrantsLayer1 ADD EstimatedTotalFunding DECIMAL(18,2) NULL;' + CHAR(13);
-        
-    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'Description')
-        SET @sql = @sql + 'ALTER TABLE RawGrantsLayer1 ADD Description NVARCHAR(MAX) NULL;' + CHAR(13);
-        
-    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'EligibleApplicants')
-        SET @sql = @sql + 'ALTER TABLE RawGrantsLayer1 ADD EligibleApplicants NVARCHAR(MAX) NULL;' + CHAR(13);
-        
-    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'ProcessingTimestamp')
-        SET @sql = @sql + 'ALTER TABLE RawGrantsLayer1 ADD ProcessingTimestamp NVARCHAR(50) NULL;' + CHAR(13);
-        
-    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'SourceType')
-        SET @sql = @sql + 'ALTER TABLE RawGrantsLayer1 ADD SourceType NVARCHAR(50) NULL;' + CHAR(13);
-    
-    -- Execute the ALTER statements if any columns need to be added
-    IF LEN(@sql) > 0
+    -- Add OpportunityURL column if it doesn't exist
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'OpportunityURL')
     BEGIN
-        EXEC sp_executesql @sql;
-        PRINT '✅ Missing columns added to RawGrantsLayer1';
+        ALTER TABLE RawGrantsLayer1 ADD OpportunityURL NVARCHAR(2000) NULL;
+        PRINT '✅ Added OpportunityURL column';
     END
     ELSE
-        PRINT '✅ RawGrantsLayer1 schema is already up to date';
+        PRINT 'OpportunityURL column already exists';
+    
+    -- Add other missing columns
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'ProcessedBy')
+    BEGIN
+        ALTER TABLE RawGrantsLayer1 ADD ProcessedBy NVARCHAR(255) NULL;
+        PRINT '✅ Added ProcessedBy column';
+    END
+    
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'ProcessingTimestamp')
+    BEGIN
+        ALTER TABLE RawGrantsLayer1 ADD ProcessingTimestamp NVARCHAR(50) NULL;
+        PRINT '✅ Added ProcessingTimestamp column';
+    END
+    
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'SourceType')
+    BEGIN
+        ALTER TABLE RawGrantsLayer1 ADD SourceType NVARCHAR(50) NULL;
+        PRINT '✅ Added SourceType column';
+    END
+    
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'TotalColumns')
+    BEGIN
+        ALTER TABLE RawGrantsLayer1 ADD TotalColumns INT NULL;
+        PRINT '✅ Added TotalColumns column';
+    END
+    
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'Timestamp')
+    BEGIN
+        ALTER TABLE RawGrantsLayer1 ADD Timestamp DATETIME2 NULL;
+        PRINT '✅ Added Timestamp column';
+    END
+    
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'DataVersion')
+    BEGIN
+        ALTER TABLE RawGrantsLayer1 ADD DataVersion NVARCHAR(50) NULL;
+        PRINT '✅ Added DataVersion column';
+    END
+    
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'CategoryExplanation')
+    BEGIN
+        ALTER TABLE RawGrantsLayer1 ADD CategoryExplanation NVARCHAR(2000) NULL;
+        PRINT '✅ Added CategoryExplanation column';
+    END
+    
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'CFDANumbers')
+    BEGIN
+        ALTER TABLE RawGrantsLayer1 ADD CFDANumbers NVARCHAR(500) NULL;
+        PRINT '✅ Added CFDANumbers column';
+    END
+    
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'EstimatedTotalFunding')
+    BEGIN
+        ALTER TABLE RawGrantsLayer1 ADD EstimatedTotalFunding DECIMAL(18,2) NULL;
+        PRINT '✅ Added EstimatedTotalFunding column';
+    END
+    
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'Description')
+    BEGIN
+        ALTER TABLE RawGrantsLayer1 ADD Description NVARCHAR(MAX) NULL;
+        PRINT '✅ Added Description column';
+    END
+    
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'RawGrantsLayer1' AND COLUMN_NAME = 'EligibleApplicants')
+    BEGIN
+        ALTER TABLE RawGrantsLayer1 ADD EligibleApplicants NVARCHAR(MAX) NULL;
+        PRINT '✅ Added EligibleApplicants column';
+    END
 END
 
--- Final verification
-PRINT '';
-PRINT '🔍 Schema verification:';
-SELECT 
-    COUNT(*) as 'Total_Columns',
-    STRING_AGG(COLUMN_NAME, ', ') as 'Sample_Columns'
-FROM (
-    SELECT TOP 10 COLUMN_NAME 
-    FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_NAME = 'RawGrantsLayer1'
-    ORDER BY ORDINAL_POSITION
-) t;
+-- Create index on OpportunityURL for performance
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_RawGrants_OpportunityURL' AND object_id = OBJECT_ID('RawGrantsLayer1'))
+BEGIN
+    CREATE NONCLUSTERED INDEX IX_RawGrants_OpportunityURL 
+    ON RawGrantsLayer1 (OpportunityURL)
+    WHERE OpportunityURL IS NOT NULL;
+    PRINT '✅ Created index on OpportunityURL column';
+END
 
-PRINT '✅ RawGrantsLayer1 schema update completed successfully!';
-PRINT 'Ready to receive data from Azure Table Storage';
+-- Verification - show current schema
+PRINT '';
+PRINT '🔍 Current schema verification:';
+SELECT 
+    COUNT(*) as Total_Columns
+FROM INFORMATION_SCHEMA.COLUMNS 
+WHERE TABLE_NAME = 'RawGrantsLayer1';
+
+-- Show OpportunityURL column specifically
+SELECT 
+    'OpportunityURL_Column' as Column_Info,
+    COLUMN_NAME,
+    DATA_TYPE,
+    CHARACTER_MAXIMUM_LENGTH,
+    IS_NULLABLE
+FROM INFORMATION_SCHEMA.COLUMNS 
+WHERE TABLE_NAME = 'RawGrantsLayer1' 
+AND COLUMN_NAME = 'OpportunityURL';
+
+PRINT '✅ Schema update completed successfully!';
+PRINT '🌐 OpportunityURL column is ready for Azure Storage data';
 
 GO

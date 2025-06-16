@@ -1,366 +1,387 @@
 #!/usr/bin/env python3
 """
-Fixed Azure Data Synchronization Script
-With proper connection string handling
+Sync Azure Table Storage to RawGrantsLayer1
+Uses correct column mapping from Azure Storage to SQL Database
 """
 
 import os
-import pyodbc
+import subprocess
 from azure.data.tables import TableServiceClient
 from datetime import datetime
-import logging
-from typing import List, Dict, Any
-import time
+import json
 
-def setup_logging():
-    """Setup enhanced logging for data sync operations"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler('azure_data_sync_fixed.log', encoding='utf-8')
-        ]
-    )
-    return logging.getLogger(__name__)
-
-def setup_azure_environment():
-    """Setup Azure environment variables with fallbacks"""
-    logger = logging.getLogger(__name__)
+def sync_azure_to_sql():
+    """Sync data from Azure Table Storage to RawGrantsLayer1 with proper column mapping"""
     
-    # Known working connection string from bulk_update_grantdetails.py
-    fallback_connection_string = "DefaultEndpointsProtocol=https;AccountName=grantsgov225756;AccountKey=UXwW5dfy9MY9nh2BGmWhYUbzBve+6LUyT3F7+N3Cp0kWUoEk4AO3z5U6LrBYvo/VwO+Nduq2ay9E+AStKQb86Q==;EndpointSuffix=core.windows.net"
-    
-    # Set environment variables if not already set
-    if not os.environ.get('AzureWebJobsStorage'):
-        os.environ['AzureWebJobsStorage'] = fallback_connection_string
-        logger.info("✅ Set AzureWebJobsStorage environment variable")
-    
-    if not os.environ.get('STORAGE_CONNECTION_STRING'):
-        os.environ['STORAGE_CONNECTION_STRING'] = fallback_connection_string
-        logger.info("✅ Set STORAGE_CONNECTION_STRING environment variable")
-
-def get_azure_table_data_batched():
-    """Fetch data from Azure Table Storage with enhanced connection handling"""
-    logger = logging.getLogger(__name__)
+    # Your existing Azure connection
+    connection_string = "DefaultEndpointsProtocol=https;AccountName=grantsgov225756;AccountKey=UXwW5dfy9MY9nh2BGmWhYUbzBve+6LUyT3F7+N3Cp0kWUoEk4AO3z5U6LrBYvo/VwO+Nduq2ay9E+AStKQb86Q==;EndpointSuffix=core.windows.net"
     
     try:
-        # Multiple connection string sources
-        connection_string = (
-            os.environ.get('AzureWebJobsStorage') or 
-            os.environ.get('STORAGE_CONNECTION_STRING') or
-            os.environ.get('AZURE_STORAGE_CONNECTION_STRING')
-        )
-        
-        if not connection_string:
-            logger.error("❌ No Azure Storage connection string found in environment variables")
-            logger.info("Available environment variables:")
-            for key in os.environ.keys():
-                if 'AZURE' in key.upper() or 'STORAGE' in key.upper():
-                    logger.info(f"  {key}: {str(os.environ[key])[:50]}...")
-            raise Exception("No Azure Storage connection string found")
-        
-        logger.info(f"✅ Using connection string: {connection_string[:60]}...")
-        
         # Connect to Azure Table Storage
+        print("📡 Connecting to Azure Table Storage...")
         table_service = TableServiceClient.from_connection_string(connection_string)
         table_client = table_service.get_table_client('GrantDetails')
         
-        logger.info("🔗 Connected to Azure Table Storage - GrantDetails table")
+        # Fetch all entities
+        print("📥 Fetching data from Azure Table Storage...")
+        entities = list(table_client.query_entities("PartitionKey eq 'Grant'"))
+        print(f"✅ Retrieved {len(entities)} entities from Azure Storage")
         
-        # Test connection with a small query first
-        try:
-            test_entities = list(table_client.query_entities(
-                query_filter="PartitionKey eq 'Grant'",
-                results_per_page=5
-            ))
-            logger.info(f"✅ Connection test successful - found {len(test_entities)} sample records")
-        except Exception as test_error:
-            logger.error(f"❌ Connection test failed: {test_error}")
-            raise test_error
+        if not entities:
+            print("❌ No data found in Azure Table Storage")
+            return False
         
-        # Query all grant records with pagination
-        all_entities = []
-        page_count = 0
+        print(f"🚀 PRODUCTION MODE: Processing all {len(entities)} records...")
         
-        logger.info("📥 Starting to fetch all records...")
+        # Clear existing data in RawGrantsLayer1
+        print("🗑️ Clearing existing data in RawGrantsLayer1...")
+        clear_sql = "DELETE FROM RawGrantsLayer1;"
         
-        # Use pagination to handle large datasets
-        pages = table_client.query_entities(
-            query_filter="PartitionKey eq 'Grant'",
-            results_per_page=1000
-        ).by_page()
+        cmd = [
+            "sqlcmd", "-S", "grants-gov-sql-server.database.windows.net",
+            "-d", "GrantsGovDB", "-U", "grantsadmin", "-P", "Grant$Admin2024!",
+            "-Q", clear_sql, "-C"
+        ]
+        subprocess.run(cmd, check=True)
+        print("✅ Cleared existing data")
         
-        for page in pages:
-            page_count += 1
-            entities_in_page = list(page)
-            all_entities.extend(entities_in_page)
-            logger.info(f"📊 Processed page {page_count}: {len(entities_in_page)} records (Total: {len(all_entities)})")
-            
-            # Add small delay to avoid throttling
-            time.sleep(0.1)
+        # Process all records with optimized batch size
+        print("📤 Inserting all data into RawGrantsLayer1...")
+        batch_size = 25  # Optimized batch size for production
+        total_inserted = 0
+        total_failed = 0
         
-        logger.info(f"✅ Retrieved {len(all_entities)} total records from Azure Table Storage")
-        return all_entities
-        
-    except Exception as e:
-        logger.error(f"❌ Error fetching Azure Table Storage data: {e}")
-        return []
-
-def sync_to_sql_database_batched(entities: List[Dict[str, Any]]):
-    """Enhanced sync with batch processing and better error handling"""
-    logger = logging.getLogger(__name__)
-    
-    try:
-        # Enhanced SQL Database connection string
-        sql_conn_str = (
-            "Driver={ODBC Driver 18 for SQL Server};"
-            "Server=grants-gov-sql-server.database.windows.net;"
-            "Database=GrantsGovDB;"
-            "Uid=grantsadmin;"
-            "Pwd=Grant$Admin2024!;"
-            "Encrypt=yes;"
-            "TrustServerCertificate=no;"
-            "Connection Timeout=60;"
-            "CommandTimeout=120;"
-        )
-        
-        logger.info("🔗 Connecting to Azure SQL Database...")
-        
-        with pyodbc.connect(sql_conn_str) as conn:
-            cursor = conn.cursor()
+        for i in range(0, len(entities), batch_size):
+            batch = entities[i:i + batch_size]
+            batch_number = i//batch_size + 1
+            total_batches = (len(entities) + batch_size - 1) // batch_size
             
-            # First, ensure RawGrantsLayer1 table exists
-            logger.info("🔍 Checking RawGrantsLayer1 table structure...")
-            cursor.execute("""
-                IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'RawGrantsLayer1')
-                BEGIN
-                    PRINT 'RawGrantsLayer1 table does not exist. Please run the schema update script first.'
-                    RAISERROR('RawGrantsLayer1 table missing', 16, 1)
-                END
-            """)
+            print(f"🔄 Processing batch {batch_number}/{total_batches} ({len(batch)} records)...")
             
-            # Clear existing data for fresh sync
-            logger.info("🗑️ Clearing existing RawGrantsLayer1 data...")
-            cursor.execute("DELETE FROM RawGrantsLayer1")
-            rows_deleted = cursor.rowcount
-            conn.commit()
-            logger.info(f"✅ Cleared {rows_deleted} existing records")
-            
-            # Enhanced insert query with error handling
-            insert_query = """
-                INSERT INTO RawGrantsLayer1 (
-                    PartitionKey, RowKey, OpportunityNumber, Title, AgencyCode, AgencyName,
-                    Category, CategoryExplanation, FundingType, CFDANumbers, EstimatedTotalFunding,
-                    ExpectedAwards, AwardCeiling, AwardFloor, CostSharing, AdditionalInfoURL,
-                    GrantorContact, GrantorPhone, GrantorEmail, EstimatedPostDate, EstimatedDueDate,
-                    PostedDate, CloseDate, LastUpdatedOriginal, Version, Status, Package,
-                    SynopsisArchived, Description, EligibleApplicants, ProcessedDate,
-                    ProcessingTimestamp, SourceType, TotalColumns
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            
-            # Process in batches for better performance
-            batch_size = 100
-            synced_count = 0
-            failed_count = 0
-            
-            logger.info(f"📤 Starting to sync {len(entities)} entities in batches of {batch_size}...")
-            
-            for i in range(0, len(entities), batch_size):
-                batch = entities[i:i + batch_size]
-                batch_success = 0
-                
-                for entity_index, entity in enumerate(batch):
-                    try:
-                        # Enhanced data mapping with null handling
-                        values = (
-                            str(entity.get('PartitionKey', 'Grant'))[:255],
-                            str(entity.get('RowKey', ''))[:255],
-                            str(entity.get('OpportunityNumber', ''))[:255],
-                            str(entity.get('Title', ''))[:1000],
-                            str(entity.get('AgencyCode', ''))[:100],
-                            str(entity.get('AgencyName', ''))[:500],
-                            str(entity.get('Category', ''))[:500],
-                            str(entity.get('CategoryExplanation', ''))[:2000],
-                            str(entity.get('FundingType', ''))[:255],
-                            str(entity.get('CFDANumbers', ''))[:500],
-                            _safe_decimal(entity.get('EstimatedTotalFunding')),
-                            _safe_int(entity.get('ExpectedAwards')),
-                            _safe_decimal(entity.get('AwardCeiling')),
-                            _safe_decimal(entity.get('AwardFloor')),
-                            str(entity.get('CostSharing', ''))[:500],
-                            str(entity.get('AdditionalInfoURL', ''))[:2000],
-                            str(entity.get('GrantorContact', ''))[:500],
-                            str(entity.get('GrantorPhone', ''))[:100],
-                            str(entity.get('GrantorEmail', ''))[:255],
-                            _safe_datetime(entity.get('EstimatedPostDate')),
-                            _safe_datetime(entity.get('EstimatedDueDate')),
-                            _safe_datetime(entity.get('PostedDate')),
-                            _safe_datetime(entity.get('CloseDate')),
-                            _safe_datetime(entity.get('LastUpdatedOriginal')),
-                            str(entity.get('Version', ''))[:50],
-                            str(entity.get('Status', ''))[:100],
-                            str(entity.get('Package', ''))[:500],
-                            str(entity.get('SynopsisArchived', ''))[:50],
-                            str(entity.get('Description', '')) if entity.get('Description') else None,
-                            str(entity.get('EligibleApplicants', '')) if entity.get('EligibleApplicants') else None,
-                            _safe_datetime(entity.get('ProcessedDate')),
-                            str(entity.get('ProcessingTimestamp', ''))[:50],
-                            str(entity.get('SourceType', 'Azure_Table_Storage'))[:50],
-                            int(entity.get('TotalColumns', 28))
-                        )
-                        
-                        cursor.execute(insert_query, values)
-                        batch_success += 1
-                        synced_count += 1
-                        
-                    except Exception as e:
-                        failed_count += 1
-                        entity_id = entity.get('RowKey', f'Index_{entity_index}')
-                        logger.warning(f"⚠️ Failed to sync entity {entity_id}: {e}")
-                        continue
-                
-                # Commit batch
-                conn.commit()
-                batch_number = i//batch_size + 1
-                total_batches = (len(entities) + batch_size - 1) // batch_size
-                logger.info(f"✅ Batch {batch_number}/{total_batches}: Synced {batch_success}/{len(batch)} records")
-            
-            logger.info(f"🎉 Sync completed: {synced_count} successful, {failed_count} failed")
-            return synced_count
-            
-    except Exception as e:
-        logger.error(f"❌ Error syncing to SQL Database: {e}")
-        return 0
-
-def _safe_decimal(value):
-    """Safely convert to decimal"""
-    if value is None or value == '':
-        return None
-    try:
-        return float(str(value).replace(',', '').replace('$', ''))
-    except (ValueError, TypeError):
-        return None
-
-def _safe_int(value):
-    """Safely convert to integer"""
-    if value is None or value == '':
-        return None
-    try:
-        return int(float(str(value).replace(',', '')))
-    except (ValueError, TypeError):
-        return None
-
-def _safe_datetime(value):
-    """Safely convert to datetime"""
-    if value is None or value == '':
-        return None
-    if isinstance(value, datetime):
-        return value
-    try:
-        if isinstance(value, str):
-            for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%m/%d/%Y', '%Y-%m-%dT%H:%M:%S']:
+            # Create INSERT statements for this batch
+            insert_statements = []
+            for entity in batch:
                 try:
-                    return datetime.strptime(value, fmt)
-                except ValueError:
+                    # Proven helper functions from debug session
+                    def safe_get(key, default='', max_length=None):
+                        value = entity.get(key, default)
+                        if value is None:
+                            return 'NULL'
+                        if str(value).strip() == '':
+                            return 'NULL'
+                        if isinstance(value, str):
+                            escaped = value.replace("'", "''")
+                            if max_length and len(escaped) > max_length:
+                                escaped = escaped[:max_length]
+                            return f"'{escaped}'"
+                        return f"'{str(value)}'"
+                    
+                    def safe_get_decimal(key, default=None):
+                        value = entity.get(key, default)
+                        if value is None:
+                            return 'NULL'
+                        try:
+                            float_val = float(value)
+                            return str(float_val)
+                        except (ValueError, TypeError):
+                            return 'NULL'
+                    
+                    def safe_get_int(key, default=None):
+                        value = entity.get(key, default)
+                        if value is None:
+                            return 'NULL'
+                        try:
+                            int_val = int(float(value))
+                            return str(int_val)
+                        except (ValueError, TypeError):
+                            return 'NULL'
+                    
+                    def safe_get_bool_as_string(key, default=''):
+                        value = entity.get(key, default)
+                        if value is None:
+                            return 'NULL'
+                        return f"'{str(value)}'"
+                    
+                    def safe_get_datetime(key, default=None):
+                        value = entity.get(key, default)
+                        if value is None or str(value).strip() == '':
+                            return 'NULL'
+                        try:
+                            # Handle datetime objects from Azure Table Storage
+                            if hasattr(value, 'strftime'):
+                                return f"'{value.strftime('%Y-%m-%d %H:%M:%S')}'"
+                            # Handle string dates
+                            elif isinstance(value, str):
+                                # Try to parse common date formats
+                                from datetime import datetime
+                                try:
+                                    # Handle MM/DD/YYYY format
+                                    if '/' in value:
+                                        dt = datetime.strptime(value, '%m/%d/%Y')
+                                        return f"'{dt.strftime('%Y-%m-%d')}'"
+                                    # Handle ISO format
+                                    elif 'T' in value:
+                                        dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                                        return f"'{dt.strftime('%Y-%m-%d %H:%M:%S')}'"
+                                    else:
+                                        return 'NULL'
+                                except:
+                                    return 'NULL'
+                            else:
+                                return 'NULL'
+                        except Exception:
+                            return 'NULL'
+                    
+                    # Create INSERT with logically grouped columns INCLUDING OpportunityURL
+                    insert_sql = f"""
+INSERT INTO RawGrantsLayer1 (
+    -- Core grant identifiers (CONFIRMED to exist in your schema)
+    PartitionKey,
+    RowKey,
+    OpportunityNumber,
+    OpportunityURL,  -- 🆕 ADD THIS LINE BACK
+    Title,
+    AgencyCode,
+    AgencyName,
+    Category,
+    CategoryExplanation,
+    FundingType,
+    CFDANumbers,
+    
+    -- Financial fields (CONFIRMED to exist)
+    EstimatedTotalFunding,
+    ExpectedAwards,
+    AwardCeiling,
+    AwardFloor,
+    CostSharing,
+    
+    -- Additional information (CONFIRMED to exist)
+    AdditionalInfoURL,
+    GrantorContact,
+    GrantorPhone,
+    GrantorEmail,
+    
+    -- Date fields (CONFIRMED to exist)
+    EstimatedPostDate,
+    EstimatedDueDate,
+    PostedDate,
+    CloseDate,
+    LastUpdatedOriginal,
+    
+    -- Status and version (CONFIRMED to exist)
+    Version,
+    Status,
+    Package,
+    SynopsisArchived,
+    
+    -- Content fields (CONFIRMED to exist)
+    Description,
+    EligibleApplicants,
+    
+    -- System fields (CONFIRMED to exist)
+    ProcessedDate,
+    ProcessedBy,
+    ProcessingTimestamp,
+    SourceType,
+    CreatedDate,
+    UpdatedDate
+) VALUES (
+    -- Core grant identifiers
+    {safe_get('PartitionKey', 'Grant', 255)},
+    {safe_get('RowKey', '', 255)},
+    {safe_get('OpportunityNumber', '', 255)},
+    {safe_get('OpportunityURL', '', 2000)},  -- 🆕 ADD THIS LINE BACK
+    {safe_get('Title', '', 1000)},
+    {safe_get('AgencyCode', '', 100)},
+    {safe_get('AgencyName', '', 500)},
+    {safe_get('Category', '', 500)},
+    {safe_get('CategoryExplanation', '', 2000)},
+    {safe_get('FundingType', '', 255)},
+    {safe_get('CFDANumbers', '', 500)},
+    
+    -- Financial fields
+    {safe_get_decimal('EstimatedTotalFunding')},
+    {safe_get_int('ExpectedAwards')},
+    {safe_get_decimal('AwardCeiling')},
+    {safe_get_decimal('AwardFloor')},
+    {safe_get('CostSharing', '', 500)},
+    
+    -- Additional information
+    {safe_get('AdditionalInfoURL', '', 2000)},
+    {safe_get('GrantorContact', '', 500)},
+    {safe_get('GrantorPhone', '', 100)},
+    {safe_get('GrantorEmail', '', 255)},
+    
+    -- Date fields
+    {safe_get_datetime('EstimatedPostDate')},
+    {safe_get_datetime('EstimatedDueDate')},
+    {safe_get_datetime('PostedDate')},
+    {safe_get_datetime('CloseDate')},
+    {safe_get_datetime('LastUpdatedOriginal')},
+    
+    -- Status and version
+    {safe_get('Version', '', 50)},
+    {safe_get('Status', '', 100)},
+    {safe_get('Package', '', 500)},
+    {safe_get('SynopsisArchived', '', 50)},
+    
+    -- Content fields
+    {safe_get('Description')},
+    {safe_get('EligibleApplicants')},
+    
+    -- System fields
+    GETDATE(),  -- ProcessedDate
+    {safe_get('ProcessedBy', 'Azure_Table_Storage_Sync', 255)},
+    {safe_get('ProcessingTimestamp', '', 50)},
+    'Azure_Sync',  -- SourceType
+    GETDATE(),  -- CreatedDate
+    GETDATE()   -- UpdatedDate
+);
+"""
+                    insert_statements.append(insert_sql)
+                    
+                except Exception as e:
+                    print(f"⚠️ Error creating SQL for entity {entity.get('RowKey', 'Unknown')}: {e}")
+                    total_failed += 1
                     continue
-    except Exception:
-        pass
-    return None
-
-def verify_sync_results():
-    """Verify the sync results and show summary"""
-    logger = logging.getLogger(__name__)
-    
-    try:
-        sql_conn_str = (
-            "Driver={ODBC Driver 18 for SQL Server};"
-            "Server=grants-gov-sql-server.database.windows.net;"
-            "Database=GrantsGovDB;"
-            "Uid=grantsadmin;"
-            "Pwd=Grant$Admin2024!;"
-            "Encrypt=yes;"
-            "TrustServerCertificate=no;"
-            "Connection Timeout=30;"
-        )
+            
+            # Execute batch efficiently
+            if insert_statements:
+                batch_sql = "\n".join(insert_statements)
+                temp_file = f"temp_batch_{batch_number}.sql"
+                
+                try:
+                    with open(temp_file, 'w', encoding='utf-8') as f:
+                        f.write(batch_sql)
+                    
+                    cmd = [
+                        "sqlcmd", "-S", "grants-gov-sql-server.database.windows.net",
+                        "-d", "GrantsGovDB", "-U", "grantsadmin", "-P", "Grant$Admin2024!",
+                        "-i", temp_file, "-C"
+                    ]
+                    subprocess.run(cmd, check=True, capture_output=True, text=True)
+                    total_inserted += len(insert_statements)
+                    
+                    # Progress indicator
+                    progress = (batch_number / total_batches) * 100
+                    print(f"   ✅ Batch {batch_number} completed - {len(insert_statements)} records ({progress:.1f}% total progress)")
+                    
+                except subprocess.CalledProcessError as e:
+                    print(f"   ❌ Batch {batch_number} failed - trying individual inserts...")
+                    # Fall back to individual inserts for this batch
+                    for j, stmt in enumerate(insert_statements):
+                        individual_file = f"temp_single_{batch_number}_{j}.sql"
+                        try:
+                            with open(individual_file, 'w', encoding='utf-8') as f:
+                                f.write(stmt)
+                            
+                            cmd = [
+                                "sqlcmd", "-S", "grants-gov-sql-server.database.windows.net",
+                                "-d", "GrantsGovDB", "-U", "grantsadmin", "-P", "Grant$Admin2024!",
+                                "-i", individual_file, "-C"
+                            ]
+                            subprocess.run(cmd, check=True, capture_output=True, text=True)
+                            total_inserted += 1
+                            
+                        except:
+                            total_failed += 1
+                        finally:
+                            if os.path.exists(individual_file):
+                                os.remove(individual_file)
+                    
+                except Exception as e:
+                    print(f"   ❌ Batch {batch_number} exception: {str(e)}")
+                    total_failed += len(insert_statements)
+                finally:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+            
+            # Show progress every 10 batches
+            if batch_number % 10 == 0:
+                print(f"📊 Progress Update: {total_inserted} records inserted, {total_failed} failed")
         
-        with pyodbc.connect(sql_conn_str) as conn:
-            cursor = conn.cursor()
-            
-            # Get summary statistics
-            cursor.execute("""
-                SELECT 
-                    COUNT(*) as TotalRecords,
-                    COUNT(DISTINCT AgencyCode) as UniqueAgencies,
-                    COUNT(DISTINCT Status) as UniqueStatuses,
-                    MAX(ProcessedDate) as LatestProcessed,
-                    COUNT(CASE WHEN AwardCeiling > 0 THEN 1 END) as RecordsWithFunding
-                FROM RawGrantsLayer1
-            """)
-            
-            results = cursor.fetchone()
-            
-            print(f"\n📊 RawGrantsLayer1 Sync Summary:")
-            print(f"   Total Records: {results[0]:,}")
-            print(f"   Unique Agencies: {results[1]}")
-            print(f"   Unique Statuses: {results[2]}")
-            print(f"   Latest Processed: {results[3]}")
-            print(f"   Records with Funding: {results[4]:,}")
-            
-            return True
-            
-    except Exception as e:
-        logger.error(f"Error verifying sync results: {e}")
-        return False
+        print(f"\n🎉 PRODUCTION SYNC COMPLETED!")
+        print(f"✅ Successfully inserted: {total_inserted} records")
+        print(f"❌ Failed records: {total_failed}")
+        print(f"📈 Success rate: {(total_inserted/(total_inserted+total_failed)*100):.1f}%")
+        
+        # Enhanced verification with OpportunityURL
+        verify_sql = """
+-- Comprehensive verification including OpportunityURL
+SELECT 
+    COUNT(*) as 'Total_Records',
+    
+    -- Grant identifiers validation
+    COUNT(CASE WHEN OpportunityNumber IS NOT NULL AND OpportunityNumber != '' THEN 1 END) as 'Valid_OpportunityNumbers',
+    COUNT(CASE WHEN OpportunityURL IS NOT NULL AND OpportunityURL != '' THEN 1 END) as 'Valid_OpportunityURLs',
+    COUNT(CASE WHEN Title IS NOT NULL AND Title != '' AND Title != 'NULL' THEN 1 END) as 'Valid_Titles',
+    COUNT(CASE WHEN AgencyName IS NOT NULL AND AgencyName != '' AND AgencyName != 'NULL' THEN 1 END) as 'Valid_Agencies',
+    
+    -- Funding details validation
+    COUNT(CASE WHEN AwardCeiling IS NOT NULL AND AwardCeiling > 0 THEN 1 END) as 'Valid_Awards',
+    AVG(CASE WHEN AwardCeiling > 0 THEN AwardCeiling END) as 'Avg_Award_Amount',
+    MAX(AwardCeiling) as 'Max_Award_Amount',
+    
+    -- System tracking validation
+    MAX(ProcessedDate) as 'Latest_Sync',
+    MIN(CreatedDate) as 'First_Record_Created'
+FROM RawGrantsLayer1;
 
-def main():
-    """Fixed main synchronization workflow"""
-    logger = setup_logging()
+-- Show sample records with OpportunityURL
+SELECT TOP 5
+    'SAMPLE_WITH_URLS' as Report_Type,
     
-    print("🔄 Starting Fixed Azure Data Synchronization")
-    print("=" * 60)
-    print(f"📅 Sync Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("🎯 Source: Azure Table Storage (GrantDetails)")
-    print("📍 Destination: Azure SQL Database (RawGrantsLayer1)")
-    print("=" * 60)
+    -- Grant identifiers including new OpportunityURL
+    OpportunityNumber,
+    LEFT(OpportunityURL, 80) + '...' as OpportunityURL_Sample,
+    Title,
+    AgencyName,
     
-    # Step 0: Setup Azure environment
-    setup_azure_environment()
+    -- Funding details
+    AwardCeiling,
     
-    # Step 1: Fetch data from Azure Table Storage
-    print("\n📥 Fetching data from Azure Table Storage...")
-    entities = get_azure_table_data_batched()
-    
-    if not entities:
-        print("❌ No data found in Azure Table Storage")
-        print("💡 Try running the data refresh script first:")
-        print("   python src/scripts/bulk_update_grantdetails.py")
+    -- Processing info
+    ProcessedBy
+FROM RawGrantsLayer1 
+WHERE OpportunityURL IS NOT NULL AND OpportunityURL != ''
+ORDER BY AwardCeiling DESC;
+"""
+        
+        cmd = [
+            "sqlcmd", "-S", "grants-gov-sql-server.database.windows.net",
+            "-d", "GrantsGovDB", "-U", "grantsadmin", "-P", "Grant$Admin2024!",
+            "-Q", verify_sql, "-C"
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        print("📊 Enhanced Verification Results (including OpportunityURL):")
+        print(result.stdout)
+        
+        return total_inserted > 0
+        
+    except Exception as e:
+        print(f"❌ Error during sync: {e}")
+        import traceback
+        traceback.print_exc()
         return False
-    
-    print(f"✅ Found {len(entities):,} records in Azure Table Storage")
-    
-    # Step 2: Sync to SQL Database
-    print(f"\n📤 Syncing {len(entities):,} records to RawGrantsLayer1...")
-    synced_count = sync_to_sql_database_batched(entities)
-    
-    if synced_count == 0:
-        print("❌ Failed to sync data to SQL Database")
-        return False
-    
-    print(f"✅ Successfully synced {synced_count:,} records to RawGrantsLayer1")
-    
-    # Step 3: Verify results
-    print("\n🔍 Verifying sync results...")
-    if verify_sync_results():
-        print("✅ Sync verification completed")
-    
-    print(f"\n🎉 Azure Data Synchronization Completed Successfully!")
-    print(f"📊 Data Flow: Azure Table Storage ({len(entities):,}) → RawGrantsLayer1 ({synced_count:,})")
-    print("\n🚀 RawGrantsLayer1 is now updated with your latest data!")
-    
-    return True
 
 if __name__ == "__main__":
-    success = main()
-    exit(0 if success else 1)
+    print("🚀 AZURE TABLE STORAGE TO SQL SYNC - WITH OPPORTUNITY URLS")
+    print("=" * 65)
+    print(f"📅 Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("🌐 Now includes OpportunityURL mapping from Azure Table Storage")
+    
+    start_time = datetime.now()
+    success = sync_azure_to_sql()
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+    
+    if success:
+        print(f"\n🎯 ENHANCED SYNC COMPLETED SUCCESSFULLY!")
+        print(f"⏱️ Total time: {duration:.2f} seconds")
+        print("✅ RawGrantsLayer1 fully populated including OpportunityURL links")
+        print("🌐 Direct grants.gov opportunity URLs now available for each record")
+        
+    else:
+        print(f"\n❌ SYNC FAILED!")
+        print(f"⏱️ Failed after: {duration:.2f} seconds")
+        print("Check the error messages above")

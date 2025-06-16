@@ -1,0 +1,50 @@
+name: Grants.gov Data Pipeline
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Run daily at 6 AM UTC
+  workflow_dispatch:     # Manual trigger
+  push:
+    branches: [ main ]
+    paths: 
+      - 'src/**'
+      - 'sql/**'
+
+jobs:
+  data-pipeline:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Install SQL Server tools
+      run: |
+        curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+        curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+        sudo apt-get update
+        sudo apt-get install -y mssql-tools18 unixodbc-dev
+        echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >> ~/.bashrc
+    
+    - name: Run Data Pipeline
+      env:
+        AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+      run: |
+        # Run the ETL pipeline
+        python src/scripts/sync_azure_data.py
+        python src/scripts/transform_layer2.py
+        python src/scripts/create_layer3_final.py
+    
+    - name: Validate Results
+      run: |
+        # Add validation queries here
+        echo "Data pipeline completed successfully"

@@ -1,0 +1,19 @@
+{
+  "azure_sql": {
+    "server": "grants-gov-sql-server.database.windows.net",
+    "database": "GrantsGovDB",
+    "username": "grantsadmin",
+    "connection_timeout": 30,
+    "command_timeout": 300
+  },
+  "data_pipeline": {
+    "batch_size": 50,
+    "max_retries": 3,
+    "quality_threshold": 0.4,
+    "enable_enrichment": true
+  },
+  "azure_storage": {
+    "account_name": "grantsgov",
+    "container_name": "grants-data"
+  }
+}

@@ -1013,19 +1013,11 @@ class AutomatedGrantsFetcher:
     def _get_complete_column_mappings(self) -> Dict[str, str]:
         """Complete mapping of CSV columns to Azure Table Storage properties"""
         return {
-            # Core Opportunity Information
+            # EXACT grants.gov CSV columns (verified structure)
             "OPPORTUNITY NUMBER": "OpportunityNumber",
-            "\ufeffOPPORTUNITY NUMBER": "OpportunityNumber",
-            "OPPORTUNITY TITLE": "Title",
-            "OPPORTUNITY_TITLE": "Title",
-            
-            # Agency Information
+            "OPPORTUNITY TITLE": "Title", 
             "AGENCY CODE": "AgencyCode",
             "AGENCY NAME": "AgencyName",
-            "AGENCY_CODE": "AgencyCode",
-            "AGENCY_NAME": "AgencyName",
-            
-            # Funding Information
             "CATEGORY OF FUNDING ACTIVITY": "Category",
             "FUNDING CATEGORY EXPLANATION": "CategoryExplanation",
             "FUNDING INSTRUMENT TYPE": "FundingType",
@@ -1035,48 +1027,33 @@ class AutomatedGrantsFetcher:
             "AWARD CEILING": "AwardCeiling",
             "AWARD FLOOR": "AwardFloor",
             "COST SHARING / MATCH REQUIREMENT": "CostSharing",
-            
-            # Contact Information
+            "LINK TO ADDITIONAL INFORMATION": "AdditionalInfoURL",
             "GRANTOR CONTACT": "GrantorContact",
-            "GRANTOR CONTACT PHONE": "GrantorPhone",
+            "GRANTOR CONTACT PHONE": "GrantorPhone", 
             "GRANTOR CONTACT EMAIL": "GrantorEmail",
-            
-            # Dates
             "ESTIMATED POST DATE": "EstimatedPostDate",
             "ESTIMATED APPLICATION DUE DATE": "EstimatedDueDate",
             "POSTED DATE": "PostedDate",
             "CLOSE DATE": "CloseDate",
             "LAST UPDATED DATE/TIME": "LastUpdatedOriginal",
-            
-            # Status and Version
             "VERSION": "Version",
             "OPPORTUNITY STATUS": "Status",
-            "OPPORTUNITY PACKAGE": "Package",
+            "OPPORTUNITY PACKAGE": "Package", 
             "SYNOPSIS ARCHIVED": "SynopsisArchived",
-            
-            # Descriptions
             "FUNDING DESCRIPTION": "Description",
             "ELIGIBLE APPLICANTS": "EligibleApplicants",
             
-            # Links
-            "LINK TO ADDITIONAL INFORMATION": "AdditionalInfoURL",
+            # Handle BOM variants (byte order mark)
+            "\ufeffOPPORTUNITY NUMBER": "OpportunityNumber",
+            "\ufeffOPPORTUNITY TITLE": "Title",
             
-            # Additional fields that may appear
+            # Legacy/alternative column names (for compatibility)
             "CFDA NUMBER": "CFDANumbers",
             "CFDA_NUMBER": "CFDANumbers",
-            "SYNOPSIS": "Synopsis",
-            "FULL_DESCRIPTION": "FullDescription",
-            "PROGRAM_TITLE": "ProgramTitle",
-            "ACTIVITY_CODE": "ActivityCode",
-            "SPONSOR": "Sponsor",
-            "DEADLINE": "Deadline",
-            "SUBMISSION_INFO": "SubmissionInfo",
-            "CONTACT_INFO": "ContactInfo",
-            "ELIGIBILITY": "Eligibility",
-            "RESTRICTIONS": "Restrictions",
-            "KEYWORDS": "Keywords",
-            "LOCATION": "Location",
-            "PERFORMANCE_PERIOD": "PerformancePeriod"
+            "OPPORTUNITY_NUMBER": "OpportunityNumber",
+            "OPPORTUNITY_TITLE": "Title",
+            "AGENCY_CODE": "AgencyCode", 
+            "AGENCY_NAME": "AgencyName"
         }
 
     def _safe_string_truncate(self, value: str, max_length: int) -> str:

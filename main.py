@@ -28,7 +28,7 @@ def main():
     try:
         if choice == "1":
             # FIXED IMPORT PATH
-            from data_collection.bulk_update_grantdetails import AutomatedGrantsFetcher
+            from scripts.bulk_update_grantdetails import AutomatedGrantsFetcher
             fetcher = AutomatedGrantsFetcher()
             fetcher.run_automated_fetch()
         elif choice == "2":
@@ -42,7 +42,7 @@ def main():
         elif choice == "4":
             print("🔄 Running complete pipeline...")
             
-            from data_collection.bulk_update_grantdetails import AutomatedGrantsFetcher
+            from scripts.bulk_update_grantdetails import AutomatedGrantsFetcher
             from data_sync.sync_azure_to_sql import sync_azure_to_sql
             
             fetcher = AutomatedGrantsFetcher()
