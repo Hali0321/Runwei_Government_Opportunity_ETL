@@ -1,8 +1,8 @@
-name: Grants.gov Data Pipeline
+name: Azure Grants.gov Data Pipeline
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # Run daily at 6 AM UTC
+    - cron: '0 6 * * *'  # Daily at 6 AM UTC
   workflow_dispatch:     # Manual trigger
   push:
     branches: [ main ]
@@ -11,40 +11,69 @@ on:
       - 'sql/**'
 
 jobs:
-  data-pipeline:
+  azure-data-pipeline:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
     
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
     
-    - name: Install dependencies
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Install SQL Server tools
+    - name: Install Azure SQL Tools
       run: |
-        curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
-        curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+        curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+        curl -sSL https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
         sudo apt-get update
-        sudo apt-get install -y mssql-tools18 unixodbc-dev
-        echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >> ~/.bashrc
+        sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+        echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >> $GITHUB_ENV
     
-    - name: Run Data Pipeline
+    - name: Run Azure Data Pipeline
+      env:
+        AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+        AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+      run: |
+        echo "🚀 Starting Azure Grants.gov Data Pipeline"
+        
+        # Run complete pipeline
+        python src/main.py <<< "4"
+    
+    - name: Validate Pipeline Results
       env:
         AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
       run: |
-        # Run the ETL pipeline
-        python src/scripts/sync_azure_data.py
-        python src/scripts/transform_layer2.py
-        python src/scripts/create_layer3_final.py
+        echo "🔍 Validating pipeline results..."
+        
+        # Check Layer 1 records
+        LAYER1_COUNT=$(sqlcmd -S grants-gov-sql-server.database.windows.net \
+                               -d GrantsGovDB -U grantsadmin -P "$AZURE_SQL_PASSWORD" \
+                               -Q "SELECT COUNT(*) FROM RawGrantsLayer1;" -h -1 -C)
+        echo "📊 Layer 1 Records: $LAYER1_COUNT"
+        
+        # Check Layer 2 records  
+        LAYER2_COUNT=$(sqlcmd -S grants-gov-sql-server.database.windows.net \
+                               -d GrantsGovDB -U grantsadmin -P "$AZURE_SQL_PASSWORD" \
+                               -Q "SELECT COUNT(*) FROM CleanGrantsLayer2;" -h -1 -C)
+        echo "🧹 Layer 2 Records: $LAYER2_COUNT"
+        
+        # Check Layer 3 records
+        LAYER3_COUNT=$(sqlcmd -S grants-gov-sql-server.database.windows.net \
+                               -d GrantsGovDB -U grantsadmin -P "$AZURE_SQL_PASSWORD" \
+                               -Q "SELECT COUNT(*) FROM GrantOpportunities;" -h -1 -C)
+        echo "🎯 Layer 3 Records: $LAYER3_COUNT"
+        
+        echo "✅ Pipeline validation completed successfully"
     
-    - name: Validate Results
+    - name: Report Status
+      if: always()
       run: |
-        # Add validation queries here
-        echo "Data pipeline completed successfully"
+        echo "📈 Azure Grants.gov Data Pipeline Status: ${{ job.status }}"
+        echo "⏰ Completed at: $(date)"

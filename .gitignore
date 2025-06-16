@@ -12,8 +12,6 @@ venv/
 *.tmp
 *_temp*
 *.sql.temp
-safe_transform.sql
-layer2_transform*.sql
 
 # IDE
 .vscode/
