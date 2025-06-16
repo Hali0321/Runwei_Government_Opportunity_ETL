@@ -1,138 +1,152 @@
-# Runwei Government Opportunity ETL
+# 🚀 Grants.gov Azure Data Processing Pipeline
 
-A comprehensive Azure-based ETL solution for processing federal grant opportunities from Grants.gov into a standardized company database schema.
+[![Azure](https://img.shields.io/badge/Azure-Cloud-blue)](https://azure.microsoft.com/)
+[![Python](https://img.shields.io/badge/Python-3.8+-green)](https://python.org/)
+[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+
+Enterprise-grade automated grants.gov data collection and processing system built on Microsoft Azure cloud infrastructure.
+
+## 🎯 Overview
+
+This system provides a complete end-to-end solution for automatically fetching, processing, and analyzing grants.gov opportunities using Azure cloud services. The system implements a robust 3-layer data architecture for optimal data processing and business intelligence.
 
 ## 🏗️ Architecture
 
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Grants.gov    │───▶│  Azure Functions │───▶│ Azure Storage   │
-│      API        │    │   ETL Pipeline   │    │   Tables        │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌──────────────────┐
-                       │ Company Database │
-                       │     Schema       │
-                       └──────────────────┘
-```
+\`\`\`
+grants.gov → Selenium Automation → Azure Table Storage → Azure SQL Database
+                                            ↓
+                                3-Layer Data Pipeline:
+                                ┌─ RawGrantsLayer1 (Source Data)
+                                ├─ RunweiFormatLayer2 (Business Logic) 
+                                └─ BusinessIntelligenceLayer3 (Analytics)
+\`\`\`
 
 ## ✨ Features
 
-### **Data Collection**
-- 🔄 Automated grant opportunity collection from Grants.gov API
-- 📊 Real-time data ingestion with pagination support
-- 🛡️ Error handling and retry mechanisms
-- 📅 Scheduled data collection via Azure Functions
-
-### **Data Processing** 
-- 🔧 Transform raw grant data to company database schema
-- 🏷️ Standardized field mapping and data validation
-- 💰 Financial data parsing and normalization
-- 🎯 Opportunity categorization and tagging
-
-### **Data Storage**
-- ☁️ Azure Table Storage for scalable data persistence
-- 📋 Multiple output formats (JSON, CSV, Azure Tables)
-- 🔍 Searchable and queryable data structure
-- 📈 Historical data tracking and versioning
-
-### **Monitoring & Diagnostics**
-- 🩺 Storage connectivity diagnostics
-- 📊 Data quality monitoring
-- 🚨 Error tracking and alerting
-- 📋 Processing statistics and reporting
+- **🤖 Automated Data Collection**: Selenium-powered automation for grants.gov
+- **☁️ Azure Table Storage**: Scalable NoSQL storage for raw grant data  
+- **🗄️ Azure SQL Database**: Structured data with 3-layer architecture
+- **⚡ Batch Processing**: Efficiently handles 1,600+ records with error recovery
+- **📊 Business Intelligence**: Competitive scoring and opportunity recommendations
+- **🔍 Data Validation**: Comprehensive type checking and sanitization
+- **📈 Progress Tracking**: Real-time processing status and performance metrics
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Azure subscription
-- Azure Functions Core Tools
-- Python 3.9+
-- Git
+- Python 3.8+
+- Azure subscription with Table Storage and SQL Database
+- Chrome/Firefox browser for Selenium
 
-### Deployment
-
-```bash
-# Clone the repository
-git clone https://github.com/Hali0321/Runwei_Government_Opportunity_ETL.git
-cd Runwei_Government_Opportunity_ETL
-
-# Install dependencies
+### Installation
+\`\`\`bash
+git clone https://github.com/your-username/grants_gov_api_azure.git
+cd grants_gov_api_azure
 pip install -r requirements.txt
+\`\`\`
 
-# Deploy to Azure Functions
-cd src/azure_functions
-func azure functionapp publish your-function-app-name --python
-```
+### Configuration
+1. Copy \`.env.template\` to \`.env\`
+2. Copy \`config/azure_config.template\` to \`config/azure_config.env\`
+3. Update with your Azure connection strings and database credentials
 
-## 📡 API Endpoints
+### Usage
+\`\`\`bash
+# Run the main application
+python main.py
 
-### **GrantsCollector** 
-```
-GET /api/grantscollector?limit=100&agency=NSF
-```
-- Collects grant opportunities from Grants.gov API
-- Stores raw data in Azure Storage
+# Or run specific components
+python -m src.data_sync.sync_azure_to_sql
+python -m src.data_collection.bulk_update_grantdetails
+\`\`\`
 
-### **DataProcessing**
-```
-GET /api/dataprocessor?source=azure_table&format=json&limit=50
-```
-- Transforms grant data to company schema
-- Supports multiple output formats
+## 📊 Data Pipeline
 
-### **StorageDiagnostic**
-```
-GET /api/storagediagnostic
-```
-- Provides storage connectivity and table information
-- Useful for troubleshooting and monitoring
+### Layer 1: RawGrantsLayer1
+- **Purpose**: Raw data from grants.gov via Azure Table Storage
+- **Volume**: 1,683+ grant opportunities  
+- **Schema**: 37 fields including titles, amounts, agencies, dates
 
-## 🗂️ Data Schema
+### Layer 2: RunweiFormatLayer2  
+- **Purpose**: Business-ready formatted data
+- **Processing**: Data transformation, standardization, categorization
 
-### **Input Schema (Grants.gov)**
-- Opportunity Number, Title, Agency Information
-- Funding Details, Deadlines, Eligibility Requirements
-- CFDA Numbers, Contact Information
+### Layer 3: BusinessIntelligenceLayer3
+- **Purpose**: Analytics and intelligent recommendations
+- **Features**: Competitive scoring (0-100), opportunity ranking, priority classification
 
-### **Output Schema (Company Database)**
-- Standardized opportunity fields
-- Financial information (Award Value, Cash Award)
-- Geographic and eligibility data
-- Application URLs and contact details
+## 🛠️ Development
 
-## 🛠️ Configuration
+### Project Structure
+\`\`\`
+grants_gov_api_azure/
+├── src/
+│   ├── data_collection/     # Grants.gov data collection
+│   ├── data_sync/          # Azure to SQL synchronization
+│   ├── data_processing/    # Data transformation
+│   ├── azure_functions/    # Azure Functions
+│   └── utils/              # Utility functions
+├── sql/
+│   ├── schemas/            # Database schemas
+│   └── deployment/         # Deployment scripts
+├── config/                 # Configuration templates
+├── deployment/             # Azure infrastructure scripts
+├── docs/                   # Documentation
+└── tests/                  # Unit tests
+\`\`\`
 
-Environment variables required:
-```bash
-STORAGE_CONNECTION_STRING=your_azure_storage_connection_string
-GRANTS_GOV_API_KEY=your_grants_gov_api_key (optional)
-```
+## 📈 Performance Metrics
 
-## 📊 Monitoring
+- **Processing Speed**: ~11 records/second
+- **Success Rate**: >95% with error recovery
+- **Data Volume**: 1,683+ records processed efficiently  
+- **Batch Size**: 25 records per batch (optimized)
 
-The solution includes comprehensive monitoring:
-- Real-time processing statistics
-- Data quality metrics
-- Error tracking and alerting
-- Storage utilization monitoring
+## 🔧 Configuration
+
+Key configuration options in \`.env\`:
+
+\`\`\`env
+AZURE_STORAGE_CONNECTION_STRING=your_connection_string
+SQL_SERVER=your-sql-server.database.windows.net
+BATCH_SIZE=25
+DEBUG_MODE=False
+\`\`\`
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+1. Fork the repository  
+2. Create a feature branch (\`git checkout -b feature/amazing-feature\`)  
+3. Commit your changes (\`git commit -m 'Add amazing feature'\`)  
+4. Push to the branch (\`git push origin feature/amazing-feature'\`)  
+5. Open a Pull Request
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 🆘 Support
+## 🔗 Links
 
-For support and questions:
-- Create an issue in this repository
-- Check the documentation in the `/docs` folder
-- Review the diagnostic endpoints for troubleshooting
+- [grants.gov Official Site](https://www.grants.gov)
+- [Azure Documentation](https://docs.microsoft.com/azure/)
+
+---
+
+**Built with ❤️ for the grants community using Azure Cloud**
+
+## 📚 Complete Documentation
+
+This README provides a quick start guide. For comprehensive documentation:
+
+### **📖 Core Documentation**
+- **[Database Architecture](sql/DATABASE_ARCHITECTURE.md)** - 3-layer database design and schema
+- **[ETL Pipeline](docs/ETL_PIPELINE.md)** - Data collection and transformation processes
+- **[API Reference](docs/api/API_REFERENCE.md)** - Complete endpoint documentation
+
+### **🚀 Setup & Deployment**  
+- **[Deployment Guide](docs/deployment/DEPLOYMENT_GUIDE.md)** - Step-by-step Azure setup
+- **[System Architecture](docs/architecture/SYSTEM_DESIGN.md)** - Technical architecture overview
+
+### **🔧 Development**
+- **[Contributing Guidelines](CONTRIBUTING.md)** - Development workflow and standards
+- **[Change Log](CHANGELOG.md)** - Version history and updates

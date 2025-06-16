@@ -1,34 +1,28 @@
-bin
-obj
-csx
-.vs
-edge
-Publish
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-*.user
-*.suo
-*.cscfg
-*.Cache
-project.lock.json
-
-/packages
-/TestResults
-
-/tools/NuGet.exe
-/App_Data
-/secrets
-/data
-.secrets
-appsettings.json
-local.settings.json
-
-node_modules
-dist
-
-# Local python packages
-.python_packages/
-
-# Python Environments
+# Virtual environments
 .env
 .venv
 env/
@@ -37,32 +31,57 @@ ENV/
 env.bak/
 venv.bak/
 
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Azurite artifacts
-__blobstorage__
-__queuestorage__
-__azurite_db*__.json
-# Azure Functions specific
-src/azure_functions/.venv/
-src/azure_functions/.python_packages/
-src/azure_functions/local.settings.json
-*.csv
-*.xlsx
-
-# Large data files
-*.csv
-*.json.bak
-*.log
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# IDE files
+# IDE
+.vscode/
+.idea/
 *.swp
 *.swo
 *~
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+temp_*.sql
+temp_*.json
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Azure
+.azure/
+
+# Database
+*.db
+*.sqlite
+
+# Selenium
+geckodriver.log
+chromedriver.log
+
+# Azure Configuration (sensitive)
+config/grantsgov_config.env
+config/azure_config.env
+*connection_string*
+*.key
+
+# Deployment scripts with credentials  
+deploy_grantsgov_functions.sh
+deployment-package.zip
+
+# SQL connection details
+*connection_details*
+*Connection_Details*
+
+# Function app packages
+*.funcpack
+
+# Large files
+*.zip
+*.tar.gz
+
+# Generated deployment files
+azure_standalone_deploy.sql
