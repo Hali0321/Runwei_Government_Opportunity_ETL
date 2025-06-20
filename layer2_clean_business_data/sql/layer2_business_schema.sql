@@ -23,6 +23,7 @@ CREATE TABLE CleanGrantsLayer2 (
     Title NVARCHAR(1000) NOT NULL,
     Description NVARCHAR(MAX) NULL,
     OpportunityURL NVARCHAR(2000) NULL,
+    AdditionalInfoURL NVARCHAR(2000) NULL, -- New field for additional information links
     
     -- Agency Information (Standardized)
     AgencyName NVARCHAR(500) NULL,

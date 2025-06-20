@@ -1,37 +1,38 @@
+# Azure Credentials & Secrets
+*.env
+.env*
+secrets.json
+appsettings.json
+*.key
+*.pem
+connection_strings.txt
+sql_credentials.txt
+database_config.py
+api_keys.txt
+*.token
+
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-env/
 venv/
+env/
 .venv/
 
-# Temporary files
-*.tmp
-*_temp*
-*.sql.temp
-
-# IDE
+# IDE & System
 .vscode/
 .idea/
-*.swp
-*.swo
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Secrets
-*.env
-config/secrets.json
-*.key
-
-# Logs
+# Logs & Data
 *.log
 logs/
+*.csv
+*.xlsx
+data_exports/
+backup_files/
 
-# Database
-*.db
-*.sqlite
+# Azure
+local.settings.json
+.azure/
+.func/
