@@ -238,3 +238,36 @@ Made with ❤️ for the grants and funding community
 [![View Documentation](https://img.shields.io/badge/View-Documentation-28a745?style=for-the-badge&logo=read-the-docs)](docs/README.md)
 
 </div>
+## Layer 3 - Final Opportunities ✅
+
+**Status**: Complete and Operational
+**Table**: `dbo.FinalOpportunities`
+**Records**: 1,671 opportunities
+
+### Features
+- Azure SQL Database optimized structure
+- Industry categorization and mapping
+- Featured opportunity identification
+- SEO-friendly URL slugs
+- Performance-optimized indexes
+
+### Usage
+```bash
+# Create Layer 3 table
+cd layers/layer3_final_opportunities/scripts
+python3 create_layer3_final_opportunities.py
+```
+
+### Key Transformations
+- **OpportunityNumber** → **ID** (Primary Key)
+- **Title** → **Title** (Truncated, indexed)
+- **AgencyName** → **Industry** (Categorized)
+- **EstimatedTotalFunding** → **AwardValue** (Cleaned)
+- **Category** → **OpportunityTypeId** (Mapped)
+
+### Sample Queries
+```sql
+SELECT COUNT(*) FROM dbo.FinalOpportunities;
+SELECT * FROM dbo.FinalOpportunities WHERE IsFeatured = 'Yes';
+SELECT Industry, COUNT(*) FROM dbo.FinalOpportunities GROUP BY Industry;
+```
