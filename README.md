@@ -271,3 +271,39 @@ SELECT COUNT(*) FROM dbo.FinalOpportunities;
 SELECT * FROM dbo.FinalOpportunities WHERE IsFeatured = 'Yes';
 SELECT Industry, COUNT(*) FROM dbo.FinalOpportunities GROUP BY Industry;
 ```
+
+
+## 🔒 Business Rules Implementation
+
+### CostSharing Filter ✅ IMPLEMENTED
+**Status**: Complete and Operational  
+**Applied**: 2025-06-21  
+**Business Rule**: Only include grant opportunities where CostSharing = false  
+
+#### Impact Summary
+- **Total Opportunities**: 1,683 → 1,546 eligible opportunities
+- **Filtered Out**: 126 opportunities requiring cost sharing (7.5%)
+- **Data Quality**: ✅ 100% compliance with business rule
+
+#### Database Changes
+- **Layer 2**: Added CostSharing tracking columns
+- **Layer 3**: Filtered to exclude cost-sharing opportunities  
+- **View Created**: `dbo.EligibleGrantsLayer2` for future layer creation
+- **Documentation**: Business rule documented in `dbo.BusinessRules` table
+
+#### Usage
+```sql
+-- Use filtered data for all future operations
+SELECT * FROM dbo.EligibleGrantsLayer2;
+
+-- Verify business rule compliance
+SELECT COUNT(*) FROM CleanGrantsLayer2 WHERE CostSharingRequired = 'true';
+-- Should return: 0
+```
+
+#### Files
+- Implementation Script: `layers/layer2_clean_business_data/scripts/add_costsharing_filter.py`
+- Documentation: `COSTSHARING_IMPLEMENTATION_SUMMARY.md`
+
+---
+
