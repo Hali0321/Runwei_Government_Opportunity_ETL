@@ -81,129 +81,109 @@ class Layer3OpportunitiesMerge:
             return None
     
     def create_opportunities_cleaned_table(self):
-        """Create Opportunities_Cleaned table with proper schema handling"""
+        """Create Opportunities_Cleaned table matching your exact structure"""
         logger.info("📋 Creating Opportunities_Cleaned table...")
         
-        # First, check if table exists and drop it if needed for clean slate
-        check_and_create_sql = """
+        create_table_sql = """
         -- ===================================
-        -- CHECK AND CREATE OPPORTUNITIES_CLEANED TABLE
-        -- With proper schema handling
+        -- CREATE OPPORTUNITIES_CLEANED TABLE
+        -- Exact structure to match your MERGE statement
         -- ===================================
         
-        -- Check if table exists
-        IF EXISTS (SELECT * FROM sys.tables WHERE name = 'Opportunities_Cleaned' AND schema_id = SCHEMA_ID('dbo'))
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Opportunities_Cleaned')
         BEGIN
-            PRINT 'Table dbo.Opportunities_Cleaned already exists - dropping to recreate';
-            DROP TABLE dbo.Opportunities_Cleaned;
+            CREATE TABLE Opportunities_Cleaned (
+                ID NVARCHAR(200) PRIMARY KEY,
+                Title NVARCHAR(MAX),
+                Url NVARCHAR(MAX),
+                Deadline NVARCHAR(100),
+                AwardValue NVARCHAR(100),
+                CashAward NVARCHAR(100),
+                ContactEmail NVARCHAR(500),
+                LogoUrl NVARCHAR(MAX),
+                CoverImage NVARCHAR(MAX),
+                ShortDescription NVARCHAR(MAX),
+                Description NVARCHAR(MAX),
+                Eligibility NVARCHAR(MAX),
+                ContactNames NVARCHAR(1000),
+                OpportunityTypeId NVARCHAR(50),
+                IndustryId NVARCHAR(50),
+                TargetCommunityId NVARCHAR(50),
+                TimeZone NVARCHAR(100),
+                DirectApplyLink NVARCHAR(MAX),
+                OpportunityGap NVARCHAR(MAX),
+                GlobalOpportunity NVARCHAR(10),
+                GlobalLocations NVARCHAR(MAX),
+                CountriesEligible NVARCHAR(MAX),
+                LocationDetails NVARCHAR(MAX),
+                SdgAlignment NVARCHAR(MAX),
+                EsoWebsite NVARCHAR(MAX),
+                ServiceProviderEso NVARCHAR(500),
+                ApprovalStatus NVARCHAR(50),
+                Cost NVARCHAR(100),
+                FinancialTerms NVARCHAR(MAX),
+                AreaOfFocus NVARCHAR(MAX),
+                Tags NVARCHAR(MAX),
+                Industry NVARCHAR(MAX),
+                Slug NVARCHAR(500),
+                AwardValueStr NVARCHAR(100),
+                DeadlineStr NVARCHAR(100),
+                DatePosted NVARCHAR(100),
+                OpportunityType NVARCHAR(100),
+                IsFeatured NVARCHAR(10),
+                PublishOnLinkedin NVARCHAR(10),
+                TargetCommunity NVARCHAR(500),
+                CreatedAt NVARCHAR(100),
+                
+                -- Add indexes for performance
+                INDEX IX_OpportunitiesCleaned_Title (Title(255)),
+                INDEX IX_OpportunitiesCleaned_Industry (Industry(255)),
+                INDEX IX_OpportunitiesCleaned_OpportunityType (OpportunityType)
+            );
+            
+            PRINT 'Opportunities_Cleaned table created successfully';
         END
-        
-        -- Create the table with explicit schema
-        CREATE TABLE dbo.Opportunities_Cleaned (
-            ID NVARCHAR(200) NOT NULL PRIMARY KEY,
-            Title NVARCHAR(MAX),
-            Url NVARCHAR(MAX),
-            Deadline NVARCHAR(100),
-            AwardValue NVARCHAR(100),
-            CashAward NVARCHAR(100),
-            ContactEmail NVARCHAR(500),
-            LogoUrl NVARCHAR(MAX),
-            CoverImage NVARCHAR(MAX),
-            ShortDescription NVARCHAR(MAX),
-            Description NVARCHAR(MAX),
-            Eligibility NVARCHAR(MAX),
-            ContactNames NVARCHAR(1000),
-            OpportunityTypeId NVARCHAR(50),
-            IndustryId NVARCHAR(50),
-            TargetCommunityId NVARCHAR(50),
-            TimeZone NVARCHAR(100),
-            DirectApplyLink NVARCHAR(MAX),
-            OpportunityGap NVARCHAR(MAX),
-            GlobalOpportunity NVARCHAR(10),
-            GlobalLocations NVARCHAR(MAX),
-            CountriesEligible NVARCHAR(MAX),
-            LocationDetails NVARCHAR(MAX),
-            SdgAlignment NVARCHAR(MAX),
-            EsoWebsite NVARCHAR(MAX),
-            ServiceProviderEso NVARCHAR(500),
-            ApprovalStatus NVARCHAR(50),
-            Cost NVARCHAR(100),
-            FinancialTerms NVARCHAR(MAX),
-            AreaOfFocus NVARCHAR(MAX),
-            Tags NVARCHAR(MAX),
-            Industry NVARCHAR(MAX),
-            Slug NVARCHAR(500),
-            AwardValueStr NVARCHAR(100),
-            DeadlineStr NVARCHAR(100),
-            DatePosted NVARCHAR(100),
-            OpportunityType NVARCHAR(100),
-            IsFeatured NVARCHAR(10),
-            PublishOnLinkedin NVARCHAR(10),
-            TargetCommunity NVARCHAR(500),
-            CreatedAt NVARCHAR(100)
-        );
-        
-        -- Create indexes for performance
-        CREATE NONCLUSTERED INDEX IX_OpportunitiesCleaned_Title 
-        ON dbo.Opportunities_Cleaned (Title(255));
-        
-        CREATE NONCLUSTERED INDEX IX_OpportunitiesCleaned_Industry 
-        ON dbo.Opportunities_Cleaned (Industry(255));
-        
-        CREATE NONCLUSTERED INDEX IX_OpportunitiesCleaned_OpportunityType 
-        ON dbo.Opportunities_Cleaned (OpportunityType);
-        
-        PRINT 'dbo.Opportunities_Cleaned table created successfully with indexes';
-        
-        -- Verify table creation
-        SELECT 
-            'TABLE_CREATED' as Status,
-            COUNT(*) as ColumnCount
-        FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_NAME = 'Opportunities_Cleaned' 
-        AND TABLE_SCHEMA = 'dbo';
+        ELSE
+        BEGIN
+            PRINT 'Opportunities_Cleaned table already exists';
+        END
         """
         
-        result = self.execute_sql_command(check_and_create_sql)
-        if result and 'TABLE_CREATED' in result:
+        result = self.execute_sql_command(create_table_sql)
+        if result:
             logger.info("✅ Opportunities_Cleaned table ready")
             return True
         else:
             logger.error("❌ Failed to create Opportunities_Cleaned table")
-            logger.error(f"Result: {result}")
             return False
     
     def execute_opportunities_merge(self):
-        """Execute MERGE statement with proper schema qualification"""
-        logger.info("🔄 Executing MERGE to dbo.Opportunities_Cleaned...")
+        """Execute MERGE statement using BusinessIntelligenceLayer3 actual columns"""
+        logger.info("🔄 Executing MERGE to Opportunities_Cleaned...")
         
-        # Check table exists before MERGE
-        verify_table_sql = """
-        SELECT 
-            'TABLE_EXISTS' as Status,
-            COUNT(*) as RecordCount
-        FROM dbo.Opportunities_Cleaned;
+        # First, let's inspect the actual table structure
+        inspect_table_sql = """
+        SELECT TOP 5 * FROM BusinessIntelligenceLayer3;
         
-        SELECT 
-            'SOURCE_DATA_AVAILABLE' as Status,
-            COUNT(*) as ActiveRecords
-        FROM dbo.BusinessIntelligenceLayer3 
-        WHERE IsActive = 1;
+        SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME = 'BusinessIntelligenceLayer3'
+        ORDER BY ORDINAL_POSITION;
         """
         
-        logger.info("🔍 Verifying table and source data...")
-        verify_result = self.execute_sql_command(verify_table_sql)
-        if verify_result:
-            logger.info(f"Verification: {verify_result}")
+        logger.info("🔍 Inspecting BusinessIntelligenceLayer3 structure...")
+        table_info = self.execute_sql_command(inspect_table_sql)
+        if table_info:
+            logger.info(f"Table structure: {table_info}")
         
-        # Updated MERGE statement with explicit schema qualification
+        # Updated MERGE statement using actual BusinessIntelligenceLayer3 columns
         merge_sql = """
         -- ===================================
         -- LAYER 3: OPPORTUNITIES MERGE
-        -- Using dbo schema qualification
+        -- Using actual BusinessIntelligenceLayer3 columns
         -- ===================================
         
-        MERGE dbo.Opportunities_Cleaned AS target
+        MERGE Opportunities_Cleaned AS target
         USING (
             SELECT
                 CAST(AnalyticsID AS NVARCHAR(200)) AS ID,
@@ -288,7 +268,7 @@ class Layer3OpportunitiesMerge:
                         ELSE FORMAT(GETDATE(), 'yyyy-MM-ddTHH:mm:ss')
                     END
                 )), ''), 'N/A'), 'n/a') AS CreatedAt
-            FROM dbo.BusinessIntelligenceLayer3
+            FROM BusinessIntelligenceLayer3
             WHERE AnalyticsID IS NOT NULL
               AND IsActive = 1
         ) AS source
@@ -364,8 +344,8 @@ class Layer3OpportunitiesMerge:
         SELECT 
             'LAYER3_OPPORTUNITIES_MERGE_COMPLETE' as Status,
             @@ROWCOUNT as RowsAffected,
-            (SELECT COUNT(*) FROM dbo.Opportunities_Cleaned) as TotalOpportunitiesInCleaned,
-            (SELECT COUNT(*) FROM dbo.BusinessIntelligenceLayer3 WHERE IsActive = 1) as TotalActiveAnalyticsRecords,
+            (SELECT COUNT(*) FROM Opportunities_Cleaned) as TotalOpportunitiesInCleaned,
+            (SELECT COUNT(*) FROM BusinessIntelligenceLayer3 WHERE IsActive = 1) as TotalActiveAnalyticsRecords,
             GETDATE() as MergeTimestamp;
         """
         

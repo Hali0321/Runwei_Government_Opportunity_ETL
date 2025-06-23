@@ -296,7 +296,7 @@ class CostSharingFilterFixed:
         return False
 
     def create_future_layer_filter(self):
-        """Create a reusable view for future layer creation"""
+        """Create a reusable view for future layer creation - Enhanced with debugging"""
         logger.info("🔧 Creating reusable CostSharing filter for future layers...")
         
         # Step 1: Drop existing view (separate batch)
@@ -315,24 +315,123 @@ class CostSharingFilterFixed:
         if not self.execute_sql_command(drop_view_sql):
             logger.warning("⚠️ Failed to drop existing view (may not exist)")
         
-        # Step 2: Create view (must be first statement in batch)
+        # Step 2: Check column existence before creating view
+        check_columns_sql = """
+        SELECT 
+            'COLUMN_CHECK' as CheckType,
+            COLUMN_NAME,
+            DATA_TYPE,
+            IS_NULLABLE
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME = 'CleanGrantsLayer2' 
+        AND COLUMN_NAME IN ('CostSharingRequired', 'ProcessedBy', 'UpdatedDate', 'BusinessRules')
+        ORDER BY COLUMN_NAME;
+        
+        -- Also check if table exists
+        SELECT 
+            'TABLE_CHECK' as CheckType,
+            COUNT(*) as RecordCount
+        FROM CleanGrantsLayer2;
+        """
+        
+        logger.info("🔍 Checking column existence before creating view...")
+        if not self.execute_sql_command(check_columns_sql):
+            logger.error("❌ Failed to check columns - cannot create view safely")
+            return False
+        
+        # Step 3: Create view with simplified column selection
         create_view_sql = """
         CREATE VIEW dbo.EligibleGrantsLayer2 AS
         SELECT 
-            c2.*,
-            'CostSharing=false' as BusinessRuleApplied,
-            GETDATE() as ViewAccessTime
-        FROM CleanGrantsLayer2 c2
-        WHERE (c2.CostSharingRequired = 'false' OR c2.CostSharingRequired IS NULL);
+            ID,
+            OpportunityNumber,
+            Title,
+            Description,
+            OpportunityURL,
+            AdditionalInfoURL,
+            AgencyName,
+            AgencyCode,
+            AwardValue,
+            AwardCeiling,
+            AwardFloor,
+            EstimatedTotalFunding,
+            ExpectedAwards,
+            FundingType,
+            Deadline,
+            PostedDate,
+            EstimatedPostDate,
+            EstimatedDueDate,
+            Category,
+            OpportunityType,
+            Eligibility,
+            EligibilityCategory,
+            CountriesEligible,
+            GlobalOpportunity,
+            TimeZone,
+            SDGTags,
+            OpportunityGap,
+            KeywordTags,
+            DataQualityScore,
+            ProcessingFlags,
+            SourceLayerID,
+            ProcessedDate,
+            DataVersion,
+            CreatedDate,
+            UpdatedDate,
+            CFDANumbers,
+            Package,
+            Status,
+            Version,
+            CostSharingRequired,
+            ProcessedBy,
+            BusinessRules,
+            'CostSharing=false' as BusinessRuleApplied
+        FROM CleanGrantsLayer2 
+        WHERE (CostSharingRequired = 'false' OR CostSharingRequired IS NULL);
         """
         
-        if not self.execute_sql_command(create_view_sql):
-            logger.error("❌ Failed to create EligibleGrantsLayer2 view")
-            return False
+        result = self.execute_sql_command(create_view_sql)
+        if not result:
+            logger.error("❌ Failed to create EligibleGrantsLayer2 view with explicit columns")
+            
+            # Try alternative view creation with SELECT *
+            logger.info("🔄 Attempting alternative view creation...")
+            alternative_view_sql = """
+            CREATE VIEW dbo.EligibleGrantsLayer2 AS
+            SELECT *
+            FROM CleanGrantsLayer2 
+            WHERE (CostSharingRequired = 'false' OR CostSharingRequired IS NULL);
+            """
+            
+            result = self.execute_sql_command(alternative_view_sql)
+            if not result:
+                logger.error("❌ Alternative view creation also failed")
+                return False
         
         logger.info("✅ Created EligibleGrantsLayer2 view")
         
-        # Step 3: Create business rules documentation table (separate batch)
+        # Step 4: Verify the view works
+        verify_view_sql = """
+        SELECT 
+            'VIEW_VERIFICATION' as VerificationType,
+            COUNT(*) as ViewRecordCount,
+            'Should match Layer 2 record count' as ExpectedResult
+        FROM dbo.EligibleGrantsLayer2;
+        
+        -- Test a sample query
+        SELECT TOP 3
+            'VIEW_SAMPLE' as SampleType,
+            OpportunityNumber,
+            LEFT(Title, 30) + '...' as Title_Preview,
+            CostSharingRequired
+        FROM dbo.EligibleGrantsLayer2
+        ORDER BY OpportunityNumber;
+        """
+        
+        if not self.execute_sql_command(verify_view_sql):
+            logger.warning("⚠️ View verification failed")
+        
+        # Continue with business rules documentation...
         documentation_sql = """
         IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'BusinessRules' AND schema_id = SCHEMA_ID('dbo'))
         BEGIN
@@ -355,7 +454,7 @@ class CostSharingFilterFixed:
         if not self.execute_sql_command(documentation_sql):
             logger.warning("⚠️ Failed to create BusinessRules table")
         
-        # Step 4: Document the business rule (separate batch)
+        # Document the business rule
         document_rule_sql = """
         IF NOT EXISTS (SELECT * FROM dbo.BusinessRules WHERE RuleName = 'CostSharing Filter')
         BEGIN
@@ -369,7 +468,10 @@ class CostSharingFilterFixed:
         END
         ELSE
         BEGIN
-            PRINT 'CostSharing Filter business rule already documented';
+            UPDATE dbo.BusinessRules 
+            SET CreatedDate = GETDATE()
+            WHERE RuleName = 'CostSharing Filter';
+            PRINT 'Updated CostSharing Filter business rule timestamp';
         END
         """
         
