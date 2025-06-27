@@ -473,57 +473,120 @@ class CompleteGrantsPipeline:
             return False
 
     def _create_insert_sql(self, entity: Dict) -> Optional[str]:
-        """Create INSERT SQL statement for entity"""
+        """Create INSERT SQL statement for entity with FIXED CostSharing mapping"""
         try:
-            def safe_get(key, default=''):
+            # Enhanced helper functions from your working import script
+            def safe_get(key, default='', max_length=None):
                 value = entity.get(key, default)
-                if value is None:
+                if value is None or str(value).strip() == '':
                     return 'NULL'
-                if str(value).strip() == '':
-                    return 'NULL'
-                escaped = str(value).replace("'", "''")
-                return f"'{escaped}'"
+                if isinstance(value, str):
+                    escaped = value.replace("'", "''")
+                    if max_length and len(escaped) > max_length:
+                        escaped = escaped[:max_length]
+                    return f"'{escaped}'"
+                return f"'{str(value)}'"
             
-            def safe_get_decimal(key):
-                value = entity.get(key)
+            def safe_get_decimal(key, default=None):
+                value = entity.get(key, default)
                 if value is None:
                     return 'NULL'
                 try:
                     return str(float(value))
-                except:
+                except (ValueError, TypeError):
                     return 'NULL'
             
+            def safe_get_datetime_with_alternatives(entity, primary_key, alternatives=None, default=None):
+                """Enhanced datetime getter with field name alternatives"""
+                if alternatives is None:
+                    alternatives = []
+                
+                # Try primary field name first
+                fields_to_try = [primary_key] + alternatives
+                
+                for field_name in fields_to_try:
+                    value = entity.get(field_name)
+                    if value is not None and str(value).strip() != '':
+                        try:
+                            # Handle datetime objects from Azure Table Storage
+                            if hasattr(value, 'strftime'):
+                                return f"'{value.strftime('%Y-%m-%d %H:%M:%S')}'"
+                            # Handle string dates
+                            elif isinstance(value, str):
+                                from datetime import datetime
+                                try:
+                                    # Handle MM/DD/YYYY format
+                                    if '/' in value:
+                                        dt = datetime.strptime(value, '%m/%d/%Y')
+                                        return f"'{dt.strftime('%Y-%m-%d')}'"
+                                    # Handle ISO format
+                                    elif 'T' in value:
+                                        dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                                        return f"'{dt.strftime('%Y-%m-%d %H:%M:%S')}'"
+                                    # Handle YYYY-MM-DD format
+                                    elif '-' in value and len(value) >= 10:
+                                        dt = datetime.strptime(value[:10], '%Y-%m-%d')
+                                        return f"'{dt.strftime('%Y-%m-%d')}'"
+                                except:
+                                    continue
+                        except Exception:
+                            continue
+                
+                return 'NULL'
+
+            # FIXED SQL with proper CostSharing mapping and ALL required columns
             sql = f"""
 INSERT INTO RawGrantsLayer1 (
     PartitionKey, RowKey, OpportunityNumber, OpportunityURL, Title,
-    AgencyCode, AgencyName, Category, FundingType, CFDANumbers,
-    EstimatedTotalFunding, AwardCeiling, AwardFloor, AdditionalInfoURL,
-    PostedDate, CloseDate, Description, EligibleApplicants,
-    ProcessedDate, ProcessedBy, SourceType, CreatedDate, UpdatedDate
+    AgencyCode, AgencyName, Category, CategoryExplanation, FundingType, CFDANumbers,
+    EstimatedTotalFunding, ExpectedAwards, AwardCeiling, AwardFloor, CostSharing,
+    AdditionalInfoURL, GrantorContact, GrantorPhone, GrantorEmail,
+    EstimatedPostDate, EstimatedDueDate, PostedDate, CloseDate, LastUpdatedOriginal,
+    Version, Status, Package, SynopsisArchived,
+    Description, EligibleApplicants,
+    ProcessedDate, ProcessedBy, ProcessingTimestamp, SourceType, TotalColumns,
+    CreatedDate, UpdatedDate, Timestamp, DataVersion
 ) VALUES (
-    {safe_get('PartitionKey', 'Grant')},
-    {safe_get('RowKey')},
-    {safe_get('OpportunityNumber')},
-    {safe_get('OpportunityURL')},
-    {safe_get('Title')},
-    {safe_get('AgencyCode')},
-    {safe_get('AgencyName')},
-    {safe_get('Category')},
-    {safe_get('FundingType')},
-    {safe_get('CFDANumbers')},
+    {safe_get('PartitionKey', 'Grant', 255)},
+    {safe_get('RowKey', '', 255)},
+    {safe_get('OpportunityNumber', '', 255)},
+    {safe_get('OpportunityURL', '', 2000)},
+    {safe_get('Title', '', 1000)},
+    {safe_get('AgencyCode', '', 100)},
+    {safe_get('AgencyName', '', 500)},
+    {safe_get('Category', '', 500)},
+    {safe_get('CategoryExplanation', '', 2000)},
+    {safe_get('FundingType', '', 255)},
+    {safe_get('CFDANumbers', '', 500)},
     {safe_get_decimal('EstimatedTotalFunding')},
+    {safe_get_decimal('ExpectedAwards')},
     {safe_get_decimal('AwardCeiling')},
     {safe_get_decimal('AwardFloor')},
-    {safe_get('AdditionalInfoURL')},
-    {safe_get('PostedDate')},
-    {safe_get('CloseDate')},
+    {safe_get('CostSharing', '', 500)},  -- FIXED: Direct mapping to get actual values
+    {safe_get('AdditionalInfoURL', '', 2000)},
+    {safe_get('GrantorContact', '', 500)},
+    {safe_get('GrantorPhone', '', 100)},
+    {safe_get('GrantorEmail', '', 255)},
+    {safe_get_datetime_with_alternatives(entity, 'EstimatedPostDate', ['PostDate'])},
+    {safe_get_datetime_with_alternatives(entity, 'EstimatedDueDate', ['DueDate'])},
+    {safe_get_datetime_with_alternatives(entity, 'PostedDate')},
+    {safe_get_datetime_with_alternatives(entity, 'CloseDate')},
+    {safe_get_datetime_with_alternatives(entity, 'LastUpdatedOriginal', ['LastUpdated'])},
+    {safe_get('Version', '', 50)},
+    {safe_get('Status', '', 100)},
+    {safe_get('Package', '', 500)},
+    {safe_get('SynopsisArchived', '', 50)},
     {safe_get('Description')},
     {safe_get('EligibleApplicants')},
     GETDATE(),
     'CompleteGrantsPipeline',
+    {safe_get('ProcessingTimestamp', '', 50)},
     'Azure_Sync',
+    {safe_get_decimal('TotalColumns')},
     GETDATE(),
-    GETDATE()
+    GETDATE(),
+    {safe_get_datetime_with_alternatives(entity, 'Timestamp', ['timestamp'])},
+    {safe_get('DataVersion', '1.0', 50)}
 );
 """
             return sql

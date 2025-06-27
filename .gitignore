@@ -1,38 +1,85 @@
-# Azure Credentials & Secrets
-*.env
-.env*
-secrets.json
-appsettings.json
-*.key
-*.pem
-connection_strings.txt
-sql_credentials.txt
-database_config.py
-api_keys.txt
-*.token
-
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
 venv/
 env/
-.venv/
+ENV/
+env.bak/
+venv.bak/
 
-# IDE & System
-
+# IDEs
+.vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Logs & Data
+# Logs
 *.log
 logs/
-*.csv
-*.xlsx
-data_exports/
-backup_files/
+*.out
+
+# Configuration
+config/database_config.py
+config/*.json
+!config/samples/
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+batch_*.sql
 
 # Azure
-local.settings.json
 .azure/
-.func/
+azure-pipelines.yml
+
+# Secrets
+.env
+*.pem
+*.key
+secrets.txt
+
+# Chrome driver
+chromedriver*
+
+# Data files
+*.csv
+*.xlsx
+data/
+downloads/
+
+# Archive/backup
+archive/
+backup/
+old/
