@@ -1,0 +1,590 @@
+@description('Azure Data Factory for Grants.gov ETL Pipeline')
+@minLength(3)
+@maxLength(63)
+param dataFactoryName string = 'df-grants-gov-etl'
+
+@deresource silverDataset 'Microsoft.DataFactory/factories/datasets@2018-06-01' = {
+  name: 'AzureSQL_ProcessedGrantsLayer2'
+  parent: dataFactory
+  properties: {tion('Location for all resources')
+param location string = resourceGroup().location
+
+@description('Azure SQL Server name')
+param sqlServerName string = 'grants-gov-sql-server'
+
+@description('Azure SQL Database name')
+param sqlDatabaseName string = 'GrantsGovDB'
+
+@description('Storage Account name')
+param storageAccountName string = 'grantsgov225756'
+
+@description('Key Vault name for storing secrets')
+param keyVaultName string = 'kv-grants-gov'
+
+@description('Environment tag')
+@allowed(['dev', 'test', 'prod'])
+param environment string = 'test'
+
+// Data Factory
+resource dataFactory 'Microsoft.DataFactory/factories@2018-06-01' = {
+  name: dataFactoryName
+  location: location
+  tags: {
+    Environment: environment
+    Project: 'GrantsGov-ETL'
+    Purpose: 'Bronze-Silver-Gold-ETL'
+  }
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    publicNetworkAccess: 'Enabled'
+    globalParameters: {
+      environment: {
+        type: 'string'
+        value: environment
+      }
+      sqlServerName: {
+        type: 'string'
+        value: sqlServerName
+      }
+      sqlDatabaseName: {
+        type: 'string'
+        value: sqlDatabaseName
+      }
+    }
+  }
+}
+
+// Key Vault reference (assumes it exists)
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
+  name: keyVaultName
+}
+
+// Grant Data Factory access to Key Vault
+resource keyVaultAccessPolicy 'Microsoft.KeyVault/vaults/accessPolicies@2023-07-01' = {
+  name: 'add'
+  parent: keyVault
+  properties: {
+    accessPolicies: [
+      {
+        tenantId: subscription().tenantId
+        objectId: dataFactory.identity.principalId
+        permissions: {
+          secrets: ['get', 'list']
+        }
+      }
+    ]
+  }
+}
+
+// Key Vault Linked Service
+resource keyVaultLinkedService 'Microsoft.DataFactory/factories/linkedservices@2018-06-01' = {
+  name: 'AzureKeyVault_GrantsGov'
+  parent: dataFactory
+  properties: {
+    type: 'AzureKeyVault'
+    typeProperties: {
+      baseUrl: keyVault.properties.vaultUri
+    }
+  }
+}
+
+// Azure SQL Linked Service
+resource azureSqlLinkedService 'Microsoft.DataFactory/factories/linkedservices@2018-06-01' = {
+  name: 'AzureSQL_GrantsGovDB'
+  parent: dataFactory
+  dependsOn: [keyVaultLinkedService]
+  properties: {
+    type: 'AzureSqlDatabase'
+    typeProperties: {
+      server: '${sqlServerName}.database.windows.net'
+      database: sqlDatabaseName
+      encrypt: 'mandatory'
+      trustServerCertificate: false
+      authenticationType: 'SQL'
+      userName: 'grantsadmin'
+      password: {
+        type: 'AzureKeyVaultSecret'
+        store: {
+          referenceName: keyVaultLinkedService.name
+          type: 'LinkedServiceReference'
+        }
+        secretName: 'GrantsGovDB-Password'
+      }
+    }
+  }
+}
+
+// Azure Function App Linked Service
+resource functionLinkedService 'Microsoft.DataFactory/factories/linkedservices@2018-06-01' = {
+  name: 'AzureFunction_LinkedService'
+  parent: dataFactory
+  dependsOn: [keyVaultLinkedService]
+  properties: {
+    type: 'AzureFunction'
+    typeProperties: {
+      functionAppUrl: 'https://grants-etl-functions.azurewebsites.net'
+      encryptedCredential: 'dummyencryptedvalue'
+      authentication: 'MSI'
+    }
+  }
+}
+
+// Datasets
+resource bronzeDataset 'Microsoft.DataFactory/factories/datasets@2018-06-01' = {
+  name: 'AzureSQL_RawGrantsLayer1'
+  parent: dataFactory
+  properties: {
+    type: 'AzureSqlTable'
+    linkedServiceName: {
+      referenceName: azureSqlLinkedService.name
+      type: 'LinkedServiceReference'
+    }
+    typeProperties: {
+      schema: 'dbo'
+      table: 'RawGrantsLayer1'
+    }
+  }
+}
+
+resource silverDataset 'Microsoft.DataFactory/factories/datasets@2018-06-01' = {
+  name: 'AzureSQL_CleanGrantsLayer2'
+  parent: dataFactory
+  dependsOn: [azureSqlLinkedService]
+  properties: {
+    type: 'AzureSqlTable'
+    linkedServiceName: {
+      referenceName: azureSqlLinkedService.name
+      type: 'LinkedServiceReference'
+    }
+    typeProperties: {
+      schema: 'dbo'
+      table: 'CleanGrantsLayer2'
+    }
+  }
+}
+
+resource goldDataset 'Microsoft.DataFactory/factories/datasets@2018-06-01' = {
+  name: 'AzureSQL_GoldGrantsOpportunities'
+  parent: dataFactory
+  dependsOn: [azureSqlLinkedService]
+  properties: {
+    type: 'AzureSqlTable'
+    linkedServiceName: {
+      referenceName: azureSqlLinkedService.name
+      type: 'LinkedServiceReference'
+    }
+    typeProperties: {
+      schema: 'dbo'
+      table: 'GoldGrantsOpportunities'
+    }
+  }
+}
+
+// Bronze Layer Pipeline
+resource bronzePipeline 'Microsoft.DataFactory/factories/pipelines@2018-06-01' = {
+  name: 'Bronze_Layer_Pipeline'
+  parent: dataFactory
+  dependsOn: [aciLinkedService, bronzeDataset]
+  properties: {
+    description: 'Bronze Layer - Extract raw data from Grants.gov using existing run_layer1.py script'
+    activities: [
+      {
+        name: 'Execute_Bronze_Layer_Script'
+        type: 'Custom'
+        dependsOn: []
+        policy: {
+          timeout: '0.01:00:00'
+          retry: 2
+          retryIntervalInSeconds: 60
+          secureOutput: false
+          secureInput: false
+        }
+        typeProperties: {
+          command: 'python3 /app/production/scripts/layers/bronze/scripts/run_layer1.py'
+          resourceLinkedService: {
+            referenceName: aciLinkedService.name
+            type: 'LinkedServiceReference'
+          }
+          folderPath: 'etl-scripts'
+        }
+      }
+      {
+        name: 'Validate_Bronze_Data'
+        type: 'Lookup'
+        dependsOn: [
+          {
+            activity: 'Execute_Bronze_Layer_Script'
+            dependencyConditions: ['Succeeded']
+          }
+        ]
+        policy: {
+          timeout: '0.00:05:00'
+          retry: 1
+          retryIntervalInSeconds: 30
+          secureOutput: false
+          secureInput: false
+        }
+        typeProperties: {
+          source: {
+            type: 'AzureSqlSource'
+            sqlReaderQuery: 'SELECT COUNT(*) as RecordCount, MAX(CreatedDate) as LatestRecord FROM RawGrantsLayer1 WHERE CreatedDate >= DATEADD(minute, -15, GETDATE())'
+            queryTimeout: '02:00:00'
+            partitionOption: 'None'
+          }
+          dataset: {
+            referenceName: bronzeDataset.name
+            type: 'DatasetReference'
+          }
+        }
+      }
+    ]
+    parameters: {
+      executionId: {
+        type: 'string'
+        defaultValue: ''
+      }
+      triggerTime: {
+        type: 'string'
+        defaultValue: ''
+      }
+    }
+  }
+}
+
+// Silver Layer Pipeline
+resource silverPipeline 'Microsoft.DataFactory/factories/pipelines@2018-06-01' = {
+  name: 'Silver_Layer_Pipeline'
+  parent: dataFactory
+  dependsOn: [aciLinkedService, silverDataset]
+  properties: {
+    description: 'Silver Layer - Transform and enhance data using existing run_layer2_complete.py script'
+    activities: [
+      {
+        name: 'Execute_Silver_Layer_Script'
+        type: 'Custom'
+        dependsOn: []
+        policy: {
+          timeout: '0.02:00:00'
+          retry: 2
+          retryIntervalInSeconds: 60
+          secureOutput: false
+          secureInput: false
+        }
+        typeProperties: {
+          command: 'python3 /app/production/scripts/layers/silver/scripts/run_layer2_complete.py'
+          resourceLinkedService: {
+            referenceName: aciLinkedService.name
+            type: 'LinkedServiceReference'
+          }
+          folderPath: 'etl-scripts'
+        }
+      }
+      {
+        name: 'Validate_Silver_Data'
+        type: 'Lookup'
+        dependsOn: [
+          {
+            activity: 'Execute_Silver_Layer_Script'
+            dependencyConditions: ['Succeeded']
+          }
+        ]
+        policy: {
+          timeout: '0.00:05:00'
+          retry: 1
+          retryIntervalInSeconds: 30
+          secureOutput: false
+          secureInput: false
+        }
+        typeProperties: {
+          source: {
+            type: 'AzureSqlSource'
+            sqlReaderQuery: 'SELECT COUNT(*) as RecordCount, COUNT(AwardValueUSD) as AwardValueCount, COUNT(SDGTags) as SDGCount, COUNT(CASE WHEN IsRolling = 1 THEN 1 END) as RollingCount FROM CleanGrantsLayer2 WHERE UpdatedDate >= DATEADD(minute, -15, GETDATE())'
+            queryTimeout: '02:00:00'
+            partitionOption: 'None'
+          }
+          dataset: {
+            referenceName: silverDataset.name
+            type: 'DatasetReference'
+          }
+        }
+      }
+    ]
+    parameters: {
+      executionId: {
+        type: 'string'
+        defaultValue: ''
+      }
+      bronzeLayerStatus: {
+        type: 'string'
+        defaultValue: ''
+      }
+    }
+  }
+}
+
+// Gold Layer Pipeline
+resource goldPipeline 'Microsoft.DataFactory/factories/pipelines@2018-06-01' = {
+  name: 'Gold_Layer_Pipeline'
+  parent: dataFactory
+  dependsOn: [aciLinkedService, goldDataset]
+  properties: {
+    description: 'Gold Layer - Create curated GoldGrantsOpportunities table using existing run_layer3.py script'
+    activities: [
+      {
+        name: 'Execute_Gold_Layer_Script'
+        type: 'Custom'
+        dependsOn: []
+        policy: {
+          timeout: '0.01:30:00'
+          retry: 2
+          retryIntervalInSeconds: 60
+          secureOutput: false
+          secureInput: false
+        }
+        typeProperties: {
+          command: 'python3 /app/production/scripts/layers/gold/scripts/run_layer3.py'
+          resourceLinkedService: {
+            referenceName: aciLinkedService.name
+            type: 'LinkedServiceReference'
+          }
+          folderPath: 'etl-scripts'
+        }
+      }
+      {
+        name: 'Validate_Gold_Data'
+        type: 'Lookup'
+        dependsOn: [
+          {
+            activity: 'Execute_Gold_Layer_Script'
+            dependencyConditions: ['Succeeded']
+          }
+        ]
+        policy: {
+          timeout: '0.00:05:00'
+          retry: 1
+          retryIntervalInSeconds: 30
+          secureOutput: false
+          secureInput: false
+        }
+        typeProperties: {
+          source: {
+            type: 'AzureSqlSource'
+            sqlReaderQuery: 'SELECT COUNT(*) as RecordCount, COUNT(CASE WHEN AwardValueUSD IS NOT NULL AND AwardValueUSD != \'NULL\' THEN 1 END) as AwardValueCount, COUNT(CASE WHEN IsRolling = 1 THEN 1 END) as RollingCount, COUNT(DISTINCT Category) as CategoryCount FROM GoldGrantsOpportunities'
+            queryTimeout: '02:00:00'
+            partitionOption: 'None'
+          }
+          dataset: {
+            referenceName: goldDataset.name
+            type: 'DatasetReference'
+          }
+        }
+      }
+    ]
+    parameters: {
+      executionId: {
+        type: 'string'
+        defaultValue: ''
+      }
+      silverLayerStatus: {
+        type: 'string'
+        defaultValue: ''
+      }
+    }
+  }
+}
+
+// Main ETL Pipeline
+resource mainEtlPipeline 'Microsoft.DataFactory/factories/pipelines@2018-06-01' = {
+  name: 'GrantsGov_ETL_Pipeline'
+  parent: dataFactory
+  dependsOn: [bronzePipeline, silverPipeline, goldPipeline]
+  properties: {
+    description: 'Complete ETL pipeline for Grants.gov data processing - Bronze → Silver → Gold layers'
+    activities: [
+      {
+        name: 'Bronze_Layer_Extract'
+        type: 'ExecutePipeline'
+        dependsOn: []
+        policy: {
+          timeout: '0.01:00:00'
+          retry: 2
+          retryIntervalInSeconds: 30
+          secureOutput: false
+          secureInput: false
+        }
+        typeProperties: {
+          pipeline: {
+            referenceName: bronzePipeline.name
+            type: 'PipelineReference'
+          }
+          waitOnCompletion: true
+          parameters: {
+            executionId: {
+              value: '@pipeline().RunId'
+              type: 'Expression'
+            }
+            triggerTime: {
+              value: '@pipeline().TriggerTime'
+              type: 'Expression'
+            }
+          }
+        }
+      }
+      {
+        name: 'Silver_Layer_Transform'
+        type: 'ExecutePipeline'
+        dependsOn: [
+          {
+            activity: 'Bronze_Layer_Extract'
+            dependencyConditions: ['Succeeded']
+          }
+        ]
+        policy: {
+          timeout: '0.02:00:00'
+          retry: 2
+          retryIntervalInSeconds: 30
+          secureOutput: false
+          secureInput: false
+        }
+        typeProperties: {
+          pipeline: {
+            referenceName: silverPipeline.name
+            type: 'PipelineReference'
+          }
+          waitOnCompletion: true
+          parameters: {
+            executionId: {
+              value: '@pipeline().RunId'
+              type: 'Expression'
+            }
+            bronzeLayerStatus: {
+              value: '@activity(\'Bronze_Layer_Extract\').output.pipelineRunId'
+              type: 'Expression'
+            }
+          }
+        }
+      }
+      {
+        name: 'Gold_Layer_Load'
+        type: 'ExecutePipeline'
+        dependsOn: [
+          {
+            activity: 'Silver_Layer_Transform'
+            dependencyConditions: ['Succeeded']
+          }
+        ]
+        policy: {
+          timeout: '0.01:30:00'
+          retry: 2
+          retryIntervalInSeconds: 30
+          secureOutput: false
+          secureInput: false
+        }
+        typeProperties: {
+          pipeline: {
+            referenceName: goldPipeline.name
+            type: 'PipelineReference'
+          }
+          waitOnCompletion: true
+          parameters: {
+            executionId: {
+              value: '@pipeline().RunId'
+              type: 'Expression'
+            }
+            silverLayerStatus: {
+              value: '@activity(\'Silver_Layer_Transform\').output.pipelineRunId'
+              type: 'Expression'
+            }
+          }
+        }
+      }
+    ]
+    parameters: {
+      executionMode: {
+        type: 'string'
+        defaultValue: 'full'
+      }
+      dataQualityThreshold: {
+        type: 'string'
+        defaultValue: '6.0'
+      }
+    }
+  }
+}
+
+// Test Trigger - 10 minutes
+resource testTrigger 'Microsoft.DataFactory/factories/triggers@2018-06-01' = {
+  name: 'ETL_Test_10Min_Trigger'
+  parent: dataFactory
+  dependsOn: [mainEtlPipeline]
+  properties: {
+    description: 'Test trigger for ETL pipeline - runs every 10 minutes in EST timezone'
+    type: 'ScheduleTrigger'
+    typeProperties: {
+      recurrence: {
+        frequency: 'Minute'
+        interval: 10
+        startTime: '2025-07-21T13:00:00Z' // 8:00 AM EST
+        timeZone: 'Eastern Standard Time'
+      }
+    }
+    pipelines: [
+      {
+        pipelineReference: {
+          type: 'PipelineReference'
+          referenceName: mainEtlPipeline.name
+        }
+        parameters: {
+          executionMode: 'test'
+          dataQualityThreshold: '6.0'
+        }
+      }
+    ]
+    runtimeState: 'Stopped'
+  }
+}
+
+// Daily Trigger - 8:00 AM EST
+resource dailyTrigger 'Microsoft.DataFactory/factories/triggers@2018-06-01' = {
+  name: 'ETL_Daily_8AM_Trigger'
+  parent: dataFactory
+  dependsOn: [mainEtlPipeline]
+  properties: {
+    description: 'Production trigger for ETL pipeline - runs daily at 8:00 AM EST'
+    type: 'ScheduleTrigger'
+    typeProperties: {
+      recurrence: {
+        frequency: 'Day'
+        interval: 1
+        startTime: '2025-07-22T13:00:00Z' // 8:00 AM EST
+        timeZone: 'Eastern Standard Time'
+        schedule: {
+          hours: [8]
+          minutes: [0]
+        }
+      }
+    }
+    pipelines: [
+      {
+        pipelineReference: {
+          type: 'PipelineReference'
+          referenceName: mainEtlPipeline.name
+        }
+        parameters: {
+          executionMode: 'production'
+          dataQualityThreshold: '6.0'
+        }
+      }
+    ]
+    runtimeState: 'Stopped'
+  }
+}
+
+// Outputs
+output dataFactoryName string = dataFactory.name
+output dataFactoryId string = dataFactory.id
+output testTriggerName string = testTrigger.name
+output dailyTriggerName string = dailyTrigger.name
+output mainPipelineName string = mainEtlPipeline.name

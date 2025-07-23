@@ -1,0 +1,87 @@
+{
+  "name": "Gold_Layer_Pipeline",
+  "properties": {
+    "description": "Gold Layer - Create curated GoldGrantsOpportunities table using existing run_layer3.py script",
+    "activities": [
+      {
+        "name": "Execute_Gold_Layer_Script",
+        "type": "Custom",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.01:30:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 60,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [
+          {
+            "name": "ScriptPath",
+            "value": "etl_pipeline/layers/gold/scripts/run_layer3.py"
+          }
+        ],
+        "typeProperties": {
+          "command": "python3 /app/etl_pipeline/layers/gold/scripts/run_layer3.py",
+          "resourceLinkedService": {
+            "referenceName": "AzureContainerInstance_LinkedService",
+            "type": "LinkedServiceReference"
+          },
+          "folderPath": "etl-scripts",
+          "referenceObjects": {
+            "linkedServices": [],
+            "datasets": []
+          }
+        }
+      },
+      {
+        "name": "Validate_Gold_Data",
+        "type": "Lookup",
+        "dependsOn": [
+          {
+            "activity": "Execute_Gold_Layer_Script",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "source": {
+            "type": "AzureSqlSource",
+            "sqlReaderQuery": "SELECT COUNT(*) as RecordCount, COUNT(CASE WHEN AwardValueUSD IS NOT NULL AND AwardValueUSD != 'NULL' THEN 1 END) as AwardValueCount, COUNT(CASE WHEN IsRolling = 1 THEN 1 END) as RollingCount, COUNT(DISTINCT Category) as CategoryCount FROM GoldGrantsOpportunities",
+            "queryTimeout": "02:00:00",
+            "partitionOption": "None"
+          },
+          "dataset": {
+            "referenceName": "AzureSQL_GoldGrantsOpportunities",
+            "type": "DatasetReference"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "executionId": {
+        "type": "string",
+        "defaultValue": ""
+      },
+      "silverLayerStatus": {
+        "type": "string",
+        "defaultValue": ""
+      }
+    },
+    "annotations": [
+      "Gold",
+      "Layer3",
+      "Load",
+      "Curated"
+    ]
+  },
+  "type": "Microsoft.DataFactory/factories/pipelines"
+}

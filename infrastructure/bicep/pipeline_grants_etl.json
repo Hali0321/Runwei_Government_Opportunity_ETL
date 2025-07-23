@@ -1,0 +1,203 @@
+{
+  "name": "GrantsGov_ETL_Pipeline",
+  "properties": {
+    "description": "Complete ETL pipeline for Grants.gov data processing - Bronze → Silver → Gold layers",
+    "activities": [
+      {
+        "name": "Bronze_Layer_Extract",
+        "type": "ExecutePipeline",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [
+          {
+            "name": "Layer",
+            "value": "Bronze"
+          },
+          {
+            "name": "Description",
+            "value": "Extract raw data from Grants.gov and store in Azure Table Storage"
+          }
+        ],
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "Bronze_Layer_Pipeline",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true,
+          "parameters": {
+            "executionId": {
+              "value": "@pipeline().RunId",
+              "type": "Expression"
+            },
+            "triggerTime": {
+              "value": "@pipeline().TriggerTime",
+              "type": "Expression"
+            }
+          }
+        }
+      },
+      {
+        "name": "Silver_Layer_Transform",
+        "type": "ExecutePipeline",
+        "dependsOn": [
+          {
+            "activity": "Bronze_Layer_Extract",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.02:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [
+          {
+            "name": "Layer",
+            "value": "Silver"
+          },
+          {
+            "name": "Description",
+            "value": "Transform and enhance data with award values, SDG mapping, rolling detection"
+          }
+        ],
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "Silver_Layer_Pipeline",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true,
+          "parameters": {
+            "executionId": {
+              "value": "@pipeline().RunId",
+              "type": "Expression"
+            },
+            "bronzeLayerStatus": {
+              "value": "@activity('Bronze_Layer_Extract').output.pipelineRunId",
+              "type": "Expression"
+            }
+          }
+        }
+      },
+      {
+        "name": "Gold_Layer_Load",
+        "type": "ExecutePipeline",
+        "dependsOn": [
+          {
+            "activity": "Silver_Layer_Transform",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.01:30:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [
+          {
+            "name": "Layer",
+            "value": "Gold"
+          },
+          {
+            "name": "Description",
+            "value": "Create curated GoldGrantsOpportunities table for production use"
+          }
+        ],
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "Gold_Layer_Pipeline",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true,
+          "parameters": {
+            "executionId": {
+              "value": "@pipeline().RunId",
+              "type": "Expression"
+            },
+            "silverLayerStatus": {
+              "value": "@activity('Silver_Layer_Transform').output.pipelineRunId",
+              "type": "Expression"
+            }
+          }
+        }
+      },
+      {
+        "name": "ETL_Success_Notification",
+        "type": "WebActivity",
+        "dependsOn": [
+          {
+            "activity": "Gold_Layer_Load",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:01:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [
+          {
+            "name": "NotificationType",
+            "value": "Success"
+          }
+        ],
+        "typeProperties": {
+          "method": "POST",
+          "url": "https://prod-00.eastus.logic.azure.com/workflows/your-logic-app-url/triggers/manual/paths/invoke",
+          "body": {
+            "value": "{\n  \"pipelineRunId\": \"@{pipeline().RunId}\",\n  \"triggerTime\": \"@{pipeline().TriggerTime}\",\n  \"status\": \"SUCCESS\",\n  \"message\": \"ETL pipeline completed successfully\",\n  \"bronzeRecords\": \"@{activity('Bronze_Layer_Extract').output.recordsProcessed}\",\n  \"silverRecords\": \"@{activity('Silver_Layer_Transform').output.recordsProcessed}\",\n  \"goldRecords\": \"@{activity('Gold_Layer_Load').output.recordsProcessed}\"\n}",
+            "type": "Expression"
+          },
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "executionMode": {
+        "type": "string",
+        "defaultValue": "full"
+      },
+      "dataQualityThreshold": {
+        "type": "string",
+        "defaultValue": "6.0"
+      }
+    },
+    "variables": {
+      "pipelineStartTime": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "errorMessage": {
+        "type": "String",
+        "defaultValue": ""
+      }
+    },
+    "annotations": [
+      "ETL",
+      "GrantsGov",
+      "Bronze-Silver-Gold",
+      "Production"
+    ],
+    "lastPublishTime": "2025-07-21T05:15:00Z"
+  },
+  "type": "Microsoft.DataFactory/factories/pipelines"
+}

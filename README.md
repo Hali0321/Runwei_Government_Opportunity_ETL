@@ -10,9 +10,10 @@
 Enterprise-grade **3-layer data architecture** for processing and enriching grants.gov opportunity data using Azure cloud services. Features automated ETL processes, AI-powered data enrichment, and production-ready APIs.
 
 ## 📊 **Current Status**
-- ✅ **1,683 grants** collected and processed from Grants.gov
-- ✅ **1,681 records** successfully enriched (99.9% success rate)
+- ✅ **1,670 grants** collected and processed from Grants.gov
+- ✅ **100% website coverage** - All sponsors have official website URLs
 - ✅ **3-layer architecture** fully operational (Raw → Clean → Production)
+- ✅ **181 agencies** with complete website integration
 - ✅ **Production-ready** with quality scoring and AI enrichment
 
 ## 🏗️ **System Architecture**
@@ -63,12 +64,13 @@ cd grants_gov_api_azure
 # Install dependencies
 pip install -r requirements.txt
 
-# Configure environment
+# Configure environment (contact team lead for credentials)
 cp .env.template .env
 # Edit .env with your Azure credentials
 
 # Run complete pipeline
-python src/main.py
+cd etl_pipeline
+python main.py
 ```
 
 ## 📋 **Key Features**
@@ -95,9 +97,9 @@ python src/main.py
 
 | Layer | Table Name | Purpose | Records |
 |-------|------------|---------|---------|
-| **Layer 1** | `RawGrantsLayer1` | Raw data preservation | 1,683 |
-| **Layer 2** | `CleanGrantsLayer2` | Clean, enriched data | 1,681 |
-| **Layer 3** | `GrantOpportunities` | Production-ready API schema | Active grants |
+| **Layer 1** | `RawGrantsLayer1` | Raw data preservation | 1,670 |
+| **Layer 2** | `CleanGrantsLayer2` | Clean, enriched data | 1,670 |
+| **Layer 3** | `GoldGrantsOpportunities` | Production-ready API schema | 1,670 |
 
 ## 🔍 **Sample Queries**
 
@@ -147,7 +149,8 @@ END;
 
 ### **Run Complete Pipeline**
 ```bash
-python src/main.py  # Select option 4 for full pipeline
+cd etl_pipeline
+python main.py  # Complete 3-layer pipeline execution
 ```
 
 ### **Individual Operations**

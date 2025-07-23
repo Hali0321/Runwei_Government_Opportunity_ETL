@@ -1,0 +1,87 @@
+{
+  "name": "Silver_Layer_Pipeline",
+  "properties": {
+    "description": "Silver Layer - Transform and enhance data using existing run_layer2_complete.py script",
+    "activities": [
+      {
+        "name": "Execute_Silver_Layer_Script",
+        "type": "Custom",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.02:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 60,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [
+          {
+            "name": "ScriptPath",
+            "value": "etl_pipeline/layers/silver/scripts/run_layer2_complete.py"
+          }
+        ],
+        "typeProperties": {
+          "command": "python3 /app/etl_pipeline/layers/silver/scripts/run_layer2_complete.py",
+          "resourceLinkedService": {
+            "referenceName": "AzureContainerInstance_LinkedService",
+            "type": "LinkedServiceReference"
+          },
+          "folderPath": "etl-scripts",
+          "referenceObjects": {
+            "linkedServices": [],
+            "datasets": []
+          }
+        }
+      },
+      {
+        "name": "Validate_Silver_Data",
+        "type": "Lookup",
+        "dependsOn": [
+          {
+            "activity": "Execute_Silver_Layer_Script",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "source": {
+            "type": "AzureSqlSource",
+            "sqlReaderQuery": "SELECT COUNT(*) as RecordCount, COUNT(AwardValueUSD) as AwardValueCount, COUNT(SDGTags) as SDGCount, COUNT(CASE WHEN IsRolling = 1 THEN 1 END) as RollingCount FROM CleanGrantsLayer2 WHERE UpdatedDate >= DATEADD(minute, -15, GETDATE())",
+            "queryTimeout": "02:00:00",
+            "partitionOption": "None"
+          },
+          "dataset": {
+            "referenceName": "AzureSQL_CleanGrantsLayer2",
+            "type": "DatasetReference"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "executionId": {
+        "type": "string",
+        "defaultValue": ""
+      },
+      "bronzeLayerStatus": {
+        "type": "string",
+        "defaultValue": ""
+      }
+    },
+    "annotations": [
+      "Silver",
+      "Layer2",
+      "Transform",
+      "Enhancement"
+    ]
+  },
+  "type": "Microsoft.DataFactory/factories/pipelines"
+}

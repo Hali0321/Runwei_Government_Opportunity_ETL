@@ -1,0 +1,53 @@
+{
+  "name": "AzureSQL_CleanGrantsLayer2",
+  "properties": {
+    "description": "Dataset for Silver Layer (CleanGrantsLayer2) validation",
+    "type": "AzureSqlTable",
+    "linkedServiceName": {
+      "referenceName": "AzureSQL_GrantsGovDB",
+      "type": "LinkedServiceReference"
+    },
+    "annotations": [
+      "Silver",
+      "Layer2",
+      "Validation"
+    ],
+    "typeProperties": {
+      "schema": "dbo",
+      "table": "CleanGrantsLayer2"
+    },
+    "schema": [
+      {
+        "name": "ID",
+        "type": "bigint",
+        "precision": 19
+      },
+      {
+        "name": "OpportunityNumber",
+        "type": "nvarchar"
+      },
+      {
+        "name": "Title",
+        "type": "nvarchar"
+      },
+      {
+        "name": "AwardValueUSD",
+        "type": "nvarchar"
+      },
+      {
+        "name": "SDGTags",
+        "type": "nvarchar"
+      },
+      {
+        "name": "IsRolling",
+        "type": "bit"
+      },
+      {
+        "name": "UpdatedDate",
+        "type": "datetime2",
+        "scale": 7
+      }
+    ]
+  },
+  "type": "Microsoft.DataFactory/factories/datasets"
+}

@@ -64,11 +64,16 @@ batch_*.sql
 .azure/
 azure-pipelines.yml
 
-# Secrets
+# Secrets and Environment Variables
 .env
+.env.local
+.env.*.local
 *.pem
 *.key
 secrets.txt
+credentials/
+config.json
+database_config.json
 
 # Chrome driver
 chromedriver*

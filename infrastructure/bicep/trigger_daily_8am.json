@@ -1,0 +1,41 @@
+{
+  "name": "ETL_Daily_8AM_Trigger",
+  "properties": {
+    "description": "Production trigger for ETL pipeline - runs daily at 8:00 AM EST",
+    "type": "ScheduleTrigger",
+    "typeProperties": {
+      "recurrence": {
+        "frequency": "Day",
+        "interval": 1,
+        "startTime": "2025-07-22T13:00:00Z",
+        "endTime": null,
+        "timeZone": "Eastern Standard Time",
+        "schedule": {
+          "hours": [8],
+          "minutes": [0]
+        }
+      }
+    },
+    "pipelines": [
+      {
+        "pipelineReference": {
+          "type": "PipelineReference",
+          "referenceName": "GrantsGov_ETL_Pipeline"
+        },
+        "parameters": {
+          "executionMode": "production",
+          "dataQualityThreshold": "6.0"
+        }
+      }
+    ],
+    "runtimeState": "Stopped",
+    "annotations": [
+      "Production",
+      "Daily",
+      "8AM",
+      "EST",
+      "ETL"
+    ]
+  },
+  "type": "Microsoft.DataFactory/factories/triggers"
+}

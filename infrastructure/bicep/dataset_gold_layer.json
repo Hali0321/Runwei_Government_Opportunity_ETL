@@ -1,0 +1,48 @@
+{
+  "name": "AzureSQL_GoldGrantsOpportunities",
+  "properties": {
+    "description": "Dataset for Gold Layer (GoldGrantsOpportunities) validation",
+    "type": "AzureSqlTable",
+    "linkedServiceName": {
+      "referenceName": "AzureSQL_GrantsGovDB",
+      "type": "LinkedServiceReference"
+    },
+    "annotations": [
+      "Gold",
+      "Layer3",
+      "Validation"
+    ],
+    "typeProperties": {
+      "schema": "dbo",
+      "table": "GoldGrantsOpportunities"
+    },
+    "schema": [
+      {
+        "name": "ID",
+        "type": "int",
+        "precision": 10
+      },
+      {
+        "name": "Title",
+        "type": "nvarchar"
+      },
+      {
+        "name": "AwardValueUSD",
+        "type": "nvarchar"
+      },
+      {
+        "name": "Category",
+        "type": "nvarchar"
+      },
+      {
+        "name": "IsRolling",
+        "type": "bit"
+      },
+      {
+        "name": "DatePosted",
+        "type": "datetime"
+      }
+    ]
+  },
+  "type": "Microsoft.DataFactory/factories/datasets"
+}

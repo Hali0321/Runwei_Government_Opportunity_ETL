@@ -1,0 +1,25 @@
+{
+  "parameters": {
+    "dataFactoryName": {
+      "value": "df-grants-gov-etl"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "sqlServerName": {
+      "value": "grants-gov-sql-server"
+    },
+    "sqlDatabaseName": {
+      "value": "GrantsGovDB"
+    },
+    "storageAccountName": {
+      "value": "grantsgov225756"
+    },
+    "keyVaultName": {
+      "value": "kv-grants-gov"
+    },
+    "environment": {
+      "value": "test"
+    }
+  }
+}

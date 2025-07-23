@@ -1,0 +1,37 @@
+{
+  "name": "ETL_Test_10Min_Trigger",
+  "properties": {
+    "description": "Test trigger for ETL pipeline - runs every 10 minutes in EST timezone",
+    "type": "ScheduleTrigger",
+    "typeProperties": {
+      "recurrence": {
+        "frequency": "Minute",
+        "interval": 10,
+        "startTime": "2025-07-21T08:00:00Z",
+        "endTime": null,
+        "timeZone": "Eastern Standard Time",
+        "schedule": null
+      }
+    },
+    "pipelines": [
+      {
+        "pipelineReference": {
+          "type": "PipelineReference",
+          "referenceName": "GrantsGov_ETL_Pipeline"
+        },
+        "parameters": {
+          "executionMode": "test",
+          "dataQualityThreshold": "6.0"
+        }
+      }
+    ],
+    "runtimeState": "Stopped",
+    "annotations": [
+      "Test",
+      "10Minutes",
+      "EST",
+      "ETL"
+    ]
+  },
+  "type": "Microsoft.DataFactory/factories/triggers"
+}

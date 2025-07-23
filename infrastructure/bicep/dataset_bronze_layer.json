@@ -1,0 +1,51 @@
+{
+  "name": "AzureSQL_RawGrantsLayer1",
+  "properties": {
+    "description": "Dataset for Bronze Layer (RawGrantsLayer1) validation",
+    "type": "AzureSqlTable",
+    "linkedServiceName": {
+      "referenceName": "AzureSQL_GrantsGovDB",
+      "type": "LinkedServiceReference"
+    },
+    "annotations": [
+      "Bronze",
+      "Layer1",
+      "Validation"
+    ],
+    "typeProperties": {
+      "schema": "dbo",
+      "table": "RawGrantsLayer1"
+    },
+    "schema": [
+      {
+        "name": "ID",
+        "type": "bigint",
+        "precision": 19
+      },
+      {
+        "name": "OpportunityNumber",
+        "type": "nvarchar"
+      },
+      {
+        "name": "Title",
+        "type": "nvarchar"
+      },
+      {
+        "name": "AgencyName",
+        "type": "nvarchar"
+      },
+      {
+        "name": "AwardCeiling",
+        "type": "decimal",
+        "precision": 18,
+        "scale": 2
+      },
+      {
+        "name": "CreatedDate",
+        "type": "datetime2",
+        "scale": 7
+      }
+    ]
+  },
+  "type": "Microsoft.DataFactory/factories/datasets"
+}

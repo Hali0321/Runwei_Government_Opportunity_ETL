@@ -1,0 +1,29 @@
+{
+  "name": "AzureSQL_GrantsGovDB",
+  "properties": {
+    "description": "Azure SQL Database connection for GrantsGovDB",
+    "type": "AzureSqlDatabase",
+    "typeProperties": {
+      "server": "grants-gov-sql-server.database.windows.net",
+      "database": "GrantsGovDB",
+      "encrypt": "mandatory",
+      "trustServerCertificate": false,
+      "authenticationType": "SQL",
+      "userName": "grantsadmin",
+      "password": {
+        "type": "AzureKeyVaultSecret",
+        "store": {
+          "referenceName": "AzureKeyVault_GrantsGov",
+          "type": "LinkedServiceReference"
+        },
+        "secretName": "GrantsGovDB-Password"
+      }
+    },
+    "annotations": [
+      "AzureSQL",
+      "GrantsGovDB",
+      "Production"
+    ]
+  },
+  "type": "Microsoft.DataFactory/factories/linkedservices"
+}

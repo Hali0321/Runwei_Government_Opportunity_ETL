@@ -1,0 +1,86 @@
+{
+  "name": "Bronze_Layer_Pipeline",
+  "properties": {
+    "description": "Bronze Layer - Extract raw data from Grants.gov using existing run_layer1.py script",
+    "activities": [
+      {
+        "name": "Execute_Bronze_Layer_Script",
+        "type": "Custom",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 60,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [
+          {
+            "name": "ScriptPath",
+            "value": "etl_pipeline/layers/bronze/scripts/run_layer1.py"
+          }
+        ],
+        "typeProperties": {
+          "command": "python3 /app/etl_pipeline/layers/bronze/scripts/run_layer1.py",
+          "resourceLinkedService": {
+            "referenceName": "AzureContainerInstance_LinkedService",
+            "type": "LinkedServiceReference"
+          },
+          "folderPath": "etl-scripts",
+          "referenceObjects": {
+            "linkedServices": [],
+            "datasets": []
+          }
+        }
+      },
+      {
+        "name": "Validate_Bronze_Data",
+        "type": "Lookup",
+        "dependsOn": [
+          {
+            "activity": "Execute_Bronze_Layer_Script",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:05:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "source": {
+            "type": "AzureSqlSource",
+            "sqlReaderQuery": "SELECT COUNT(*) as RecordCount, MAX(CreatedDate) as LatestRecord FROM RawGrantsLayer1 WHERE CreatedDate >= DATEADD(minute, -15, GETDATE())",
+            "queryTimeout": "02:00:00",
+            "partitionOption": "None"
+          },
+          "dataset": {
+            "referenceName": "AzureSQL_RawGrantsLayer1",
+            "type": "DatasetReference"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "executionId": {
+        "type": "string",
+        "defaultValue": ""
+      },
+      "triggerTime": {
+        "type": "string",
+        "defaultValue": ""
+      }
+    },
+    "annotations": [
+      "Bronze",
+      "Layer1",
+      "Extract"
+    ]
+  },
+  "type": "Microsoft.DataFactory/factories/pipelines"
+}

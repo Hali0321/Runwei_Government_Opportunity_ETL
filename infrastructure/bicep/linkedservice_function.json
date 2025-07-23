@@ -1,0 +1,28 @@
+{
+  "name": "AzureFunction_LinkedService",
+  "properties": {
+    "type": "AzureFunction",
+    "typeProperties": {
+      "functionAppUrl": "https://grants-etl-functions.azurewebsites.net",
+      "authentication": "MSI",
+      "subscriptionId": "2361614a-5170-4ddf-abba-11cc0ec2b900",
+      "resourceGroupName": "GrantsGov"
+    },
+    "description": "Azure Function App for running ETL scripts",
+    "parameters": {
+      "environment": {
+        "type": "string"
+      },
+      "sqlServerName": {
+        "type": "string"
+      },
+      "sqlDatabaseName": {
+        "type": "string"
+      },
+      "storageAccountName": {
+        "type": "string",
+        "defaultValue": "grantsgov225756"
+      }
+    }
+  }
+}
