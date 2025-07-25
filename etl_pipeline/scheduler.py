@@ -15,13 +15,17 @@ from pathlib import Path
 import json
 import os
 
-# Configure logging
+# Create logs directory if it doesn't exist
+log_dir = Path(__file__).parent.parent / "logs"
+log_dir.mkdir(exist_ok=True)
+
+# Configure logging with proper path handling
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('../logs/etl_pipeline.log')
+        logging.FileHandler(log_dir / 'etl_pipeline.log')
     ]
 )
 logger = logging.getLogger(__name__)

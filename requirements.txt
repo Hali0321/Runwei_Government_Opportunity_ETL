@@ -3,6 +3,7 @@
 # Core Python packages
 requests>=2.28.0
 python-dotenv>=0.19.0
+schedule>=1.2.0
 
 # Azure SDK
 azure-data-tables>=12.4.0

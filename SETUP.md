@@ -17,8 +17,8 @@
 
 ### 1. Clone Repository
 ```bash
-git clone https://github.com/your-company/grants_gov_api_azure.git
-cd grants_gov_api_azure
+git clone https://github.com/Hali0321/Runwei_Government_Opportunity_ETL.git
+cd Runwei_Government_Opportunity_ETL
 ```
 
 ### 2. Create Python Virtual Environment

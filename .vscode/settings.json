@@ -10,5 +10,8 @@
     "azureFunctions.projectRuntime": "~4",
     "debug.internalConsoleOptions": "neverOpen",
     "azureFunctions.projectSubpath": "src/azure_functions",
-    "azureFunctions.preDeployTask": "func: extensions install"
+    "azureFunctions.preDeployTask": "func: extensions install",
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "python-envs.pythonProjects": []
 }
