@@ -56,21 +56,39 @@ graph TB
 - sqlcmd tools
 
 ### **Installation**
+
+#### **For Development/Portfolio Use**
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/grants_gov_api_azure.git
-cd grants_gov_api_azure
+# Clone public repository
+git clone https://github.com/Hali0321/Runwei_Government_Opportunity_ETL.git
+cd Runwei_Government_Opportunity_ETL
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Configure environment (contact team lead for credentials)
-cp .env.template .env
-# Edit .env with your Azure credentials
+# Configure environment using templates
+cp .env.example .env
+cp config/SQL_Server_Connection_Details_EXAMPLE.txt config/SQL_Server_Connection_Details.txt
+# Edit both files with your Azure credentials
 
 # Run complete pipeline
 cd etl_pipeline
 python main.py
+```
+
+#### **For Production Deployment**
+```bash
+# Azure VM deployment (Ubuntu 22.04 LTS)
+# See AZURE_VM_DEPLOYMENT.md for complete setup guide
+
+# Quick VM setup
+curl -O https://raw.githubusercontent.com/Hali0321/Runwei_Government_Opportunity_ETL/main/azure_vm_setup.sh
+chmod +x azure_vm_setup.sh
+sudo ./azure_vm_setup.sh
+
+# Configure production environment
+# Add real credentials to .env file on VM
+# Automated daily execution via cron job (8:00 AM EST)
 ```
 
 ## 📋 **Key Features**
@@ -185,11 +203,27 @@ The Layer 3 schema is optimized for:
 
 ## 🔒 **Security & Compliance**
 
-- ✅ Azure AD authentication
-- ✅ Encrypted SQL connections
-- ✅ Environment-based configuration
-- ✅ No hardcoded credentials
-- ✅ Audit logging and monitoring
+### **Enterprise Security Model**
+- ✅ **Dual Repository Strategy**: Public portfolio version + Private company version
+- ✅ **Credential Segregation**: Templates in public, real credentials in private/VM only
+- ✅ **Azure AD Authentication**: Enterprise-grade access control
+- ✅ **Encrypted SQL Connections**: TLS 1.2+ for all database communications
+- ✅ **Environment-Based Configuration**: `.env` files for secure credential management
+- ✅ **Zero Hardcoded Credentials**: All sensitive data externalized
+- ✅ **Production VM Security**: SSH key authentication, restricted access
+- ✅ **Audit Logging**: Comprehensive ETL pipeline monitoring
+
+### **Repository Security**
+- **Public Repository**: [Hali0321/Runwei_Government_Opportunity_ETL](https://github.com/Hali0321/Runwei_Government_Opportunity_ETL)
+  - Contains: Code, documentation, template files
+  - Excludes: Real credentials, production configurations
+- **Private Repository**: Company-internal with full production credentials
+- **Production VM**: Real credentials stored locally, not in any repository
+
+### **Security Documentation**
+- 📋 [SECURITY.md](SECURITY.md) - Complete security guidelines
+- 🔐 [.env.example](.env.example) - Environment variable template
+- 📝 Template files for all sensitive configurations
 
 ## 🌐 **Technology Stack**
 
@@ -207,21 +241,44 @@ The Layer 3 schema is optimized for:
 
 ## 🤝 **Contributing**
 
-1. Fork the repository
+### **Development Setup**
+1. Fork the [public repository](https://github.com/Hali0321/Runwei_Government_Opportunity_ETL)
 2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
+3. Use template files for configuration (`.env.example`, etc.)
+4. Test with your own Azure credentials (not production)
+5. Commit changes (`git commit -m 'Add amazing feature'`)
+6. Push to branch (`git push origin feature/amazing-feature`)
+7. Open Pull Request
+
+### **Security Guidelines**
+- ⚠️ **Never commit real credentials** to any repository
+- ✅ Use template files for configuration examples
+- 🔒 Test with development Azure resources only
+- 📝 Update documentation for any configuration changes
 
 ## 📄 **License**
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🆘 **Support**
+## 🆘 **Support & Resources**
 
-- 🐛 [Report Issues](https://github.com/yourusername/grants_gov_api_azure/issues)
-- 💬 [Discussions](https://github.com/yourusername/grants_gov_api_azure/discussions)
-- 📧 Email: support@yourdomain.com
+### **Documentation**
+- � [**Database Architecture**](docs/DATABASE_ARCHITECTURE.md) - Complete database design
+- 🔄 [**ETL Pipeline Guide**](docs/ETL_PIPELINE.md) - Data transformation processes
+- 🚀 [**Azure VM Deployment**](AZURE_VM_DEPLOYMENT.md) - Production deployment guide
+- 🔒 [**Security Guidelines**](SECURITY.md) - Security best practices
+- 📡 [**API Reference**](docs/API_REFERENCE.md) - Endpoint documentation
+
+### **Getting Help**
+- �🐛 [Report Issues](https://github.com/Hali0321/Runwei_Government_Opportunity_ETL/issues)
+- 💬 [Discussions](https://github.com/Hali0321/Runwei_Government_Opportunity_ETL/discussions)
+- 📧 Professional inquiries: [Contact via GitHub](https://github.com/Hali0321)
+
+### **Production Status**
+- 🖥️ **Azure VM**: `grants-gov-etl-VM` (Standard_D4s_v3, Ubuntu 22.04 LTS)
+- ⏰ **Automation**: Daily ETL execution at 8:00 AM EST
+- 📊 **Monitoring**: Comprehensive logging in `~/etl_logs/`
+- 🔄 **Status**: Production-ready and operational
 
 ## 🏆 **Acknowledgments**
 
@@ -233,12 +290,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**Project Status**: ✅ **Production Ready** | **Last Updated**: June 2025 | **Records Processed**: 1,681
+**Project Status**: ✅ **Production Ready** | **Last Updated**: July 2025 | **Azure VM**: Operational
 
-Made with ❤️ for the grants and funding community
+🏆 **Enterprise ETL Pipeline** • 🔒 **Security-First Design** • ☁️ **Azure Cloud Native**
 
 [![Deploy to Azure](https://img.shields.io/badge/Deploy%20to-Azure-0078d4?style=for-the-badge&logo=microsoft-azure)](https://portal.azure.com/)
-[![View Documentation](https://img.shields.io/badge/View-Documentation-28a745?style=for-the-badge&logo=read-the-docs)](docs/README.md)
+[![View Portfolio](https://img.shields.io/badge/View-Portfolio-28a745?style=for-the-badge&logo=github)](https://github.com/Hali0321/Runwei_Government_Opportunity_ETL)
+[![Security](https://img.shields.io/badge/Security-Enterprise%20Grade-red?style=for-the-badge&logo=shield)](SECURITY.md)
 
 </div>
 ## Layer 3 - Final Opportunities ✅
