@@ -1,0 +1,4 @@
+Server: your-azure-sql-server.database.windows.net
+Database: YourDatabaseName
+Username: yourusername
+Password: YourSecurePassword123!
