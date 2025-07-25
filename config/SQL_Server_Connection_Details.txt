@@ -1,4 +1,4 @@
 Server: grants-gov-sql-server.database.windows.net
-Database: GrantsGovtDB
+Database: GrantsGovDB
 Username: grantsadmin
 Password: Grant$Admin2024!
